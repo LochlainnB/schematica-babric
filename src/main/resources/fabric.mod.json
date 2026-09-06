@@ -1,0 +1,34 @@
+{
+	"schemaVersion": 1,
+	"id": "schematica",
+	"version": "${version}",
+	"name": "Schematica",
+	"description": "Loads MCEdit .schematic files and overlays them on the world as a build guide. A Babric port of Lunatrius' Beta 1.7.3 ModLoader mod.",
+	"authors": [
+		"Lunatrius"
+	],
+	"contact": {},
+	"icon": "assets/schematica/icon.png",
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"lunatrius.schematica.Schematica"
+		],
+		"modmenu": [
+			"lunatrius.schematica.compat.ModMenuIntegration"
+		]
+	},
+	"mixins": [
+		"schematica.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.14.0",
+		"minecraft": "1.0.0-beta.7.3"
+	},
+	"suggests": {
+		"modmenu": "*"
+	},
+	"custom": {
+		"modmenu:clientsideOnly": true
+	}
+}

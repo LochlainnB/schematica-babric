@@ -1,0 +1,156 @@
+plugins {
+	id 'fabric-loom' version '1.16.3'
+	id 'babric-loom-extension' version '1.16.2'
+	id 'maven-publish'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = project.archives_base_name
+}
+
+repositories {
+	maven {
+		name = 'Babric'
+		url = 'https://maven.glass-launcher.net/babric'
+	}
+	maven {
+		name = 'Glass Releases'
+		url = 'https://maven.glass-launcher.net/releases'
+	}
+	maven {
+		name = 'Fabric'
+		url = 'https://maven.fabricmc.net/'
+	}
+	mavenCentral()
+}
+
+loom {
+	runs {
+		client {
+			// Opt-in end-to-end harness: ./gradlew runClient -Psmoketest
+			if (project.hasProperty('smoketest')) {
+				vmArg '-Dschematica.smoketest=true'
+				// -Psmoketest=dataonly skips world generation and checks only the parts that do not
+				// need one: the data layer, the keybind registration and every screen.
+				if (project.smoketest == 'dataonly') {
+					vmArg '-Dschematica.smoketest.dataonly=true'
+				}
+			}
+		}
+	}
+}
+
+// Holds StationAPI for the dev run only; nothing compiles against it.
+configurations.create('stationApi') {
+	canBeConsumed = false
+	canBeResolved = true
+}
+
+configurations.configureEach {
+	// b1.7.3's library list carries asm-all for the vanilla launchwrapper, which the Fabric dev
+	// runtime does not use. The loader's own installer metadata marks it "disallow" and gives it an
+	// unresolvable dynamic version; leaving it in also shadows the ASM 9 that Mixin needs.
+	exclude group: 'org.ow2.asm', module: 'asm-all'
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings "babric:barn:${project.barn_mappings}:v2"
+	modImplementation "babric:fabric-loader:${project.loader_version}"
+
+	// Mod Menu is optional: compiled against so the entrypoint can implement its API, never shipped,
+	// and added to the dev run so the integration can actually be clicked through. It is not on any
+	// maven the babric ecosystem publishes to, hence the checked-in jar.
+	modCompileOnly files('libs/modmenu-1.8.5-beta.11.jar')
+
+	// StationAPI is not a dependency and is never compiled against; this only puts it in the dev run
+	// so `./gradlew runClient -PstationApi` exercises the mod against the flattened block pipeline,
+	// which is what most b1.7.3 packs are built on.
+	if (project.hasProperty('stationApi')) {
+		// Non-transitive: the published pom lists the submodules, but they only ship as nested jars
+		// inside the artifact itself. See syncStationApi for why this is not a modLocalRuntime.
+		stationApi("net.modificationstation:StationAPI:${project.stationapi_version}") {
+			transitive = false
+		}
+	}
+
+	// ./gradlew runClient -PnoModMenu leaves it out of the dev run, which is how the "Mod Menu is
+	// not installed" path gets tested.
+	if (!project.hasProperty('noModMenu')) {
+		modLocalRuntime files('libs/modmenu-1.8.5-beta.11.jar')
+	}
+
+	// Beta 1.7.3 predates all of these and the babric loader's own metadata lists only ASM and
+	// Mixin, so in a real install the launcher supplies them - Prism ships guava, gson, slf4j and
+	// log4j alongside the game. The mods above expect them there: Mod Menu's list screens log
+	// through log4j, StationAPI needs guava and slf4j before it can even initialise. Dev run only;
+	// none of this is a dependency of the mod.
+	// Versions match what Prism puts on the classpath for a babric instance, bar the slf4j binding:
+	// the launcher uses log4j-slf4j18-impl, and slf4j-simple keeps the dev console readable.
+	localRuntime 'com.google.guava:guava:31.0.1-jre'
+	localRuntime 'com.google.code.gson:gson:2.8.9'
+	localRuntime 'org.apache.commons:commons-lang3:3.12.0'
+	localRuntime 'commons-io:commons-io:2.11.0'
+	localRuntime 'commons-codec:commons-codec:1.15'
+	localRuntime 'org.slf4j:slf4j-api:1.8.0-beta4'
+	localRuntime 'org.slf4j:slf4j-simple:1.8.0-beta4'
+	localRuntime 'org.apache.logging.log4j:log4j-api:2.19.0'
+	localRuntime 'org.apache.logging.log4j:log4j-core:2.19.0'
+}
+
+// StationAPI ships its whole implementation as nested jars, and loom's mod configurations remap the
+// outer jar without unpacking those, so the loader refuses to start. Putting it in the run folder
+// instead leaves the loader to unpack and remap it exactly as it does in a real install. The task
+// runs either way so that a run without -PstationApi clears it out again.
+tasks.register('syncStationApi') {
+	def modsDir = layout.projectDirectory.dir('run/mods').asFile
+	def jars = configurations.stationApi
+	inputs.files(jars)
+	doLast {
+		modsDir.mkdirs()
+		def wanted = jars.collect { it.name } as Set
+		modsDir.listFiles({ File file -> file.name.startsWith('StationAPI-') } as FileFilter)
+				.findAll { !wanted.contains(it.name) }
+				.each { it.delete() }
+		jars.each { jar ->
+			java.nio.file.Files.copy(jar.toPath(), new File(modsDir, jar.name).toPath(),
+					java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+		}
+	}
+}
+
+tasks.named('runClient') {
+	dependsOn 'syncStationApi'
+}
+
+processResources {
+	inputs.property 'version', project.version
+
+	filesMatching('fabric.mod.json') {
+		expand 'version': project.version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.encoding = 'UTF-8'
+	it.options.release = 17
+}
+
+java {
+	withSourcesJar()
+	sourceCompatibility = JavaVersion.VERSION_17
+	targetCompatibility = JavaVersion.VERSION_17
+}
+
+publishing {
+	publications {
+		create('mavenJava', MavenPublication) {
+			from components.java
+		}
+	}
+	repositories {
+	}
+}

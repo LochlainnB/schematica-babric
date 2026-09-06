@@ -1,0 +1,11 @@
+# Normalise to LF everywhere; the working tree is already LF throughout.
+* text=auto eol=lf
+
+# Batch files need CRLF to be safe under cmd.exe.
+*.bat text eol=crlf
+
+# Never touch these.
+*.jar binary
+*.png binary
+*.schematic binary
+gradle/wrapper/gradle-wrapper.jar binary
