@@ -33,6 +33,11 @@ loom {
 			// Opt-in end-to-end harness: ./gradlew runClient -Psmoketest
 			if (project.hasProperty('smoketest')) {
 				vmArg '-Dschematica.smoketest=true'
+				// -Psmoketest=multiplayer joins a server on localhost instead of making a world, and
+				// checks easy place against it - the inventory swap only really exists on a server.
+				if (project.smoketest == 'multiplayer') {
+					vmArg '-Dschematica.smoketest.multiplayer=true'
+				}
 				// -Psmoketest=dataonly skips world generation and checks only the parts that do not
 				// need one: the data layer, the keybind registration and every screen.
 				if (project.smoketest == 'dataonly') {

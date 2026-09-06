@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import lunatrius.schematica.EasyPlace;
+import lunatrius.schematica.HotbarRestock;
 import lunatrius.schematica.Schematica;
 import lunatrius.schematica.SchematicaConfig;
 import lunatrius.schematica.SchematicaState;
@@ -22,12 +23,14 @@ import lunatrius.schematica.util.Translations;
 import lunatrius.schematica.util.Vec3i;
 import net.fabricmc.loader.api.metadata.ModMetadata;
 import net.minecraft.Item;
+import net.minecraft.MultiplayerInteractionManager;
 import net.minecraft.SingleplayerInteractionManager;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.SignBlockEntity;
 import net.minecraft.class_260;
 import net.minecraft.class_27;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screen.ConnectScreen;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.TitleScreen;
 import net.minecraft.client.gui.screen.option.KeybindsScreen;
@@ -50,6 +53,14 @@ import org.lwjgl.input.Keyboard;
 public final class SmokeTest {
 	private static final boolean ENABLED = Boolean.getBoolean("schematica.smoketest");
 	private static final boolean WORLD_TEST = !Boolean.getBoolean("schematica.smoketest.dataonly");
+	/**
+	 * Joins a server on localhost instead of making a world, and checks easy place against it. The
+	 * inventory swap is the half of easy place that only exists on a server: in single player the
+	 * clicks are applied on the spot, and none of the asking and answering happens at all.
+	 */
+	private static final boolean MULTIPLAYER = Boolean.getBoolean("schematica.smoketest.multiplayer");
+	private static final String SERVER_HOST = "localhost";
+	private static final int SERVER_PORT = 25565;
 
 	private static final int STRUCTURE_SIZE = 5;
 
@@ -66,6 +77,16 @@ public final class SmokeTest {
 	private static final int WOOL = 35;
 	private static final int RED_WOOL = 14;
 	private static final int PISTON = 33;
+	private static final int COBBLESTONE = 4;
+	private static final int SNOW_LAYER = 78;
+
+	/** Nine blocks to fill the bar plus the gold, which is what the server is asked to hand out. */
+	private static final int TEST_STACKS = 10;
+	/** Where the hotbar starts in the player container. */
+	private static final int HOTBAR_FIRST_SLOT = 36;
+
+	/** A slot in the inventory proper, out of the hotbar and so out of reach without a swap. */
+	private static final int MAIN_SLOT = 20;
 
 	private static final int HOTBAR_SIZE = 9;
 	private static final int GOLD_SLOT = 3;
@@ -83,7 +104,7 @@ public final class SmokeTest {
 	/** Frames the overlay may spend catching up after that before something is declared wrong. */
 	private static final int REBUILD_TIMEOUT_TICKS = 20 * 30;
 
-	private enum Phase { DATA, START_WORLD, WAIT_WORLD, BUILD, SAVE, LOAD, SHOOT, DONE }
+	private enum Phase { DATA, START_WORLD, WAIT_WORLD, BUILD, SAVE, LOAD, SHOOT, MULTIPLAYER, DONE }
 
 	private static Phase phase = Phase.DATA;
 	private static int ticks = 0;
@@ -135,6 +156,14 @@ public final class SmokeTest {
 				return;
 
 			case START_WORLD:
+				if (MULTIPLAYER) {
+					Log.info("SMOKETEST: connecting to " + SERVER_HOST + ":" + SERVER_PORT);
+					phase = Phase.WAIT_WORLD;
+					ticks = 0;
+					mc.setScreen(new ConnectScreen(mc, SERVER_HOST, SERVER_PORT));
+					return;
+				}
+
 				Log.info("SMOKETEST: creating world (this takes a while on first run)");
 				// Set the phase first: method_2120 blocks for the whole of world generation, and the
 				// game keeps ticking underneath it.
@@ -160,9 +189,13 @@ public final class SmokeTest {
 				if (mc.world != null && mc.player != null && ticks > 60) {
 					// method_2120 leaves whatever screen was open in place; close it so the world renders.
 					mc.setScreen(null);
-					phase = Phase.BUILD;
+					phase = MULTIPLAYER ? Phase.MULTIPLAYER : Phase.BUILD;
 					ticks = 0;
 				}
+				return;
+
+			case MULTIPLAYER:
+				runMultiplayerTests(mc);
 				return;
 
 			case BUILD:
@@ -437,6 +470,297 @@ public final class SmokeTest {
 		} catch (java.io.IOException exception) {
 			fail("could not read options.txt", exception);
 		}
+	}
+
+	// --- on a server -------------------------------------------------------------------------
+
+	private static int serverStep = 0;
+	private static int hitX;
+	private static int hitY;
+	private static int hitZ;
+	private static int targetX;
+	private static int targetY;
+	private static int targetZ;
+	private static double joinX;
+	private static double joinY;
+	private static double joinZ;
+
+	/**
+	 * Easy place against a real server, which is the only place half of it exists: in single player
+	 * a slot click is applied on the spot and there is nobody to ask, so nothing about asking and
+	 * being answered is exercised at all.
+	 *
+	 * <p>Written as steps rather than as one method because most of it is waiting - for the items
+	 * the server hands out, for it to answer a swap, and for it to take back a block it did not like.
+	 * The server is expected to have been told to give the player a full hotbar of cobblestone and
+	 * then the gold, which is what puts the gold out of reach in the inventory proper.
+	 */
+	private static void runMultiplayerTests(Minecraft mc) {
+		if (mc.player == null) {
+			// Between the death and the respawn there is no player to ask about anything.
+			fail("the player went away mid-test", null);
+			finish(mc);
+			return;
+		}
+
+		// Straight down, and kept there while the items are handed out. Beta throws a given item in
+		// the direction the player faces, and looking down drops it at their feet instead of sending
+		// it skidding out of reach - so nothing has to be chased, and nothing wanders into a hole.
+		if (serverStep < 2) {
+			mc.player.pitch = 90.0F;
+		}
+
+		switch (serverStep) {
+			case 0:
+				// The join is still settling: the player is dropping into place and chunks are arriving.
+				if (ticks < 100) {
+					return;
+				}
+				Log.info("SMOKETEST: --- easy place on a server ---");
+				checkTrue("the client is talking to a server",
+						mc.interactionManager instanceof MultiplayerInteractionManager);
+				Log.info("SMOKETEST: joined as " + mc.session.username + " at "
+						+ (int) mc.player.x + ", " + (int) mc.player.y + ", " + (int) mc.player.z);
+				joinX = mc.player.x;
+				joinY = mc.player.y;
+				joinZ = mc.player.z;
+				nextStep(1);
+				return;
+
+			case 1:
+				// Waited for rather than timed: the server hands the items out when it gets round to it.
+				if (stackCount(mc.player.inventory) < TEST_STACKS) {
+					if (ticks % 40 == 0) {
+						Log.info("SMOKETEST: waiting for items - inventory is " + describe(mc.player.inventory));
+					}
+					if (ticks > 20 * 90) {
+						fail("the server never handed out the test items - inventory is "
+								+ describe(mc.player.inventory), null);
+						finish(mc);
+					}
+					return;
+				}
+
+				// Whichever slots the items happened to land in, put them where the test needs them:
+				// the bar full of blocks this schematic does not use, and the gold out of reach in the
+				// pack. Plain shift clicks, which is setup rather than the thing being tested.
+				arrangeInventory(mc);
+				nextStep(2);
+				return;
+
+			case 2:
+				// Give the server a moment to agree with the setup clicks before testing on top of them.
+				if (ticks < 20) {
+					return;
+				}
+				Log.info("SMOKETEST: set up with " + describe(mc.player.inventory));
+				checkTrue("the hotbar is full, so the swap has to give something up",
+						hotbarSlotOf(mc.player.inventory, 0) < 0);
+				checkTrue("and the gold is in the pack rather than on the bar",
+						mainInventorySlotOf(mc.player.inventory, GOLD) >= 0);
+				nextStep(3);
+				return;
+
+			case 3:
+				if (!setUpServerTarget(mc)) {
+					finish(mc);
+					return;
+				}
+				nextStep(4);
+				return;
+
+			case 4:
+				Schematica.STATE.isEasyPlace = true;
+				HotbarRestock.reset();
+				mc.field_2823 = hitResult(hitX, hitY, hitZ, SIDE_UP);
+				checkTrue("the click that finds a block in the inventory places nothing",
+						EasyPlace.interceptUse(mc));
+				Log.info("SMOKETEST: after the swap the inventory is " + describe(mc.player.inventory));
+				checkTrue("the block is swapped onto the hotbar", hotbarSlotOf(mc.player.inventory, GOLD) >= 0);
+				checkTrue("and the swap waits on the server before anything is built",
+						HotbarRestock.isWaitingForServer());
+				nextStep(5);
+				return;
+
+			case 5:
+				// The answer arrives over the network, so this is a wait rather than a check.
+				if (HotbarRestock.isBusy()) {
+					if (ticks > 20 * 10) {
+						fail("the server never answered the swap", null);
+						finish(mc);
+					}
+					return;
+				}
+				check("the server took the swap", HotbarRestock.getRefusals(), 0);
+				checkTrue("and the block is still on the hotbar now it has agreed",
+						hotbarSlotOf(mc.player.inventory, GOLD) >= 0);
+				nextStep(6);
+				return;
+
+			case 6:
+				mc.field_2823 = hitResult(hitX, hitY, hitZ, SIDE_UP);
+				checkTrue("the next click goes through", !EasyPlace.interceptUse(mc));
+				check("with the block that was swapped over in hand",
+						itemIdAt(mc.player.inventory, mc.player.inventory.selectedSlot), GOLD);
+				rightClick(mc);
+				nextStep(7);
+				return;
+
+			default:
+				// A block the server did not accept would have been taken back off us by now.
+				if (ticks < 40) {
+					return;
+				}
+				check("the server kept the block that was placed",
+						mc.world.getBlockId(targetX, targetY, targetZ), GOLD);
+				check("no swap was turned down anywhere along the way", HotbarRestock.getRefusals(), 0);
+				Log.info("SMOKETEST: --- easy place on a server done ---");
+				finish(mc);
+		}
+	}
+
+	private static void nextStep(int next) {
+		serverStep = next;
+		ticks = 0;
+	}
+
+	/**
+	 * Finds somewhere beside the player to build - a full block with two clear blocks over it, near
+	 * enough that the server allows the reach - and puts a one block schematic over the empty space.
+	 */
+	private static boolean setUpServerTarget(Minecraft mc) {
+		int px = (int) Math.floor(mc.player.x);
+		int py = (int) Math.floor(mc.player.y);
+		int pz = (int) Math.floor(mc.player.z);
+
+		// Clear ground first. Failing that a snow layer, which is the one block a placement replaces
+		// where it stands rather than landing on top of - and in a snowy biome it covers everything.
+		for (int pass = 0; pass < 2; pass++) {
+			for (int dx = -4; dx <= 4; dx++) {
+				for (int dz = -4; dz <= 4; dz++) {
+					if (Math.abs(dx) < 2 && Math.abs(dz) < 2) {
+						continue; // where the player is standing
+					}
+
+					for (int dy = -3; dy <= 2; dy++) {
+						int x = px + dx;
+						int y = py + dy;
+						int z = pz + dz;
+						if (mc.world.getBlockId(x, y + 1, z) != 0) {
+							continue;
+						}
+
+						boolean ground = pass == 0
+								&& mc.world.method_1783(x, y, z)
+								&& mc.world.getBlockId(x, y + 2, z) == 0;
+						boolean snow = pass == 1 && mc.world.getBlockId(x, y, z) == SNOW_LAYER;
+						if (!ground && !snow) {
+							continue;
+						}
+
+						hitX = x;
+						hitY = y;
+						hitZ = z;
+						targetX = x;
+						targetY = snow ? y : y + 1;
+						targetZ = z;
+						return loadSingleBlockSchematic(mc);
+					}
+				}
+			}
+		}
+
+		StringBuilder around = new StringBuilder();
+		for (int dy = -3; dy <= 2; dy++) {
+			around.append(around.length() == 0 ? "" : ", ").append("y").append(py + dy).append('=')
+					.append(mc.world.getBlockId(px + 2, py + dy, pz));
+		}
+		fail("found nowhere beside the player to build - standing at " + px + ", " + py + ", " + pz
+				+ " with " + around, null);
+		return false;
+	}
+
+	private static boolean loadSingleBlockSchematic(Minecraft mc) {
+		SchematicaState state = Schematica.STATE;
+		int[][][] blocks = new int[1][1][1];
+		blocks[0][0][0] = GOLD;
+
+		File file = new File(state.getSchematicDirectory(), "smoketest-server.schematic");
+		try {
+			SchematicFormat.write(file, new Schematic(blocks, new int[1][1][1], new ArrayList<>(), 1, 1, 1));
+		} catch (java.io.IOException exception) {
+			fail("could not write the server test schematic", exception);
+			return false;
+		}
+
+		if (!state.loadSchematic(file)) {
+			fail("loadSchematic returned false on the server", null);
+			return false;
+		}
+
+		state.offset.set(targetX, targetY, targetZ);
+		state.isRenderingSchematic = true;
+		state.needsUpdate = true;
+		Log.info("SMOKETEST: one gold block wanted at " + targetX + ", " + targetY + ", " + targetZ
+				+ ", reached by clicking the top of " + hitX + ", " + hitY + ", " + hitZ);
+		return true;
+	}
+
+	/**
+	 * Puts the picked-up stacks where the test needs them: the bar full of blocks the schematic does
+	 * not use, and the gold out of reach in the pack. Which slot each stack landed in depends on the
+	 * order they were swept up, so this arranges them rather than hoping.
+	 *
+	 * <p>Plain shift clicks, the same ones a player makes in their inventory screen. That is setup,
+	 * not the thing under test - what is being tested is that the mod can do this for itself, with
+	 * no screen open, and have the server agree.
+	 */
+	private static void arrangeInventory(Minecraft mc) {
+		PlayerInventory inventory = mc.player.inventory;
+		int gold = hotbarSlotOf(inventory, GOLD);
+		if (gold < 0) {
+			return;
+		}
+
+		mc.interactionManager.clickSlot(0, HOTBAR_FIRST_SLOT + gold, 0, true, mc.player);
+		for (int slot = HOTBAR_SIZE; slot < inventory.main.length; slot++) {
+			if (itemIdAt(inventory, slot) != 0 && itemIdAt(inventory, slot) != GOLD) {
+				mc.interactionManager.clickSlot(0, slot, 0, true, mc.player);
+				return;
+			}
+		}
+	}
+
+	private static int stackCount(PlayerInventory inventory) {
+		int count = 0;
+		for (int slot = 0; slot < inventory.main.length; slot++) {
+			if (inventory.main[slot] != null) {
+				count++;
+			}
+		}
+		return count;
+	}
+
+	/** Every slot that holds something, as {@code slot:item x count}. */
+	private static String describe(PlayerInventory inventory) {
+		StringBuilder text = new StringBuilder();
+		for (int slot = 0; slot < inventory.main.length; slot++) {
+			ItemStack stack = inventory.main[slot];
+			if (stack != null) {
+				text.append(text.length() == 0 ? "" : ", ")
+						.append(slot).append(':').append(stack.itemId).append('x').append(stack.count);
+			}
+		}
+		return text.length() == 0 ? "empty" : text.toString();
+	}
+
+	private static int hotbarSlotOf(PlayerInventory inventory, int itemId) {
+		for (int slot = 0; slot < HOTBAR_SIZE; slot++) {
+			if (itemIdAt(inventory, slot) == itemId) {
+				return slot;
+			}
+		}
+		return -1;
 	}
 
 	// --- in world ----------------------------------------------------------------------------
@@ -863,6 +1187,7 @@ public final class SmokeTest {
 			state.setRenderingLayer(savedLayer);
 
 			runMetadataMatchTests(mc);
+			runRestockTests(mc, x, y, z);
 
 			// Everything above asks the mod what it would do. The rest goes through the client's own
 			// click handler, which is what the mixin hangs off, so a block really does or does not
@@ -958,6 +1283,106 @@ public final class SmokeTest {
 			inventory.selectedSlot = GOLD_SLOT;
 			Schematica.STATE.needsUpdate = true;
 		}
+	}
+
+	/**
+	 * Bringing a block onto the hotbar from the rest of the inventory. The click that finds the
+	 * block is spent on the swap, so what is checked is that it places nothing, that the block is on
+	 * the bar afterwards, and that the next click builds with it.
+	 *
+	 * <p>Called with the aim already set at a gap the schematic wants gold in, and puts the
+	 * inventory and the schematic back the way it found them.
+	 */
+	private static void runRestockTests(Minecraft mc, int x, int y, int z) {
+		Schematic schematic = Schematica.STATE.schematic.getSchematic();
+		PlayerInventory inventory = mc.player.inventory;
+		ItemStack[] saved = new ItemStack[inventory.main.length];
+		System.arraycopy(inventory.main, 0, saved, 0, saved.length);
+		int savedBlock = schematic.getBlockId(2, 0, 2);
+		int savedMetadata = schematic.getMetadata(2, 0, 2);
+
+		try {
+			// Empty handed, with the gold the schematic wants sitting out of reach in the inventory.
+			clearInventory(inventory);
+			inventory.main[MAIN_SLOT] = new ItemStack(GOLD, 64, 0);
+			inventory.selectedSlot = HOTBAR_SIZE - 1;
+			HotbarRestock.reset();
+
+			checkTrue("the click that finds a block in the inventory places nothing",
+					EasyPlace.interceptUse(mc));
+			check("the block is moved onto the hotbar", itemIdAt(inventory, 0), GOLD);
+			check("and out of the inventory", itemIdAt(inventory, MAIN_SLOT), 0);
+
+			checkTrue("the next click goes through", !EasyPlace.interceptUse(mc));
+			check("with the block that was brought over in hand", inventory.selectedSlot, 0);
+			rightClick(mc);
+			check("and it builds", mc.world.getBlockId(x, y, z), GOLD);
+			mc.world.method_201(x, y, z, 0, 0);
+
+			// A full bar has to give something up. The tool is not it, and neither is a block this
+			// schematic is built out of - the cobblestone left over from something else is.
+			schematic.setBlockId(2, 0, 2, WOOL);
+			schematic.setMetadata(2, 0, 2, 0);
+			clearInventory(inventory);
+			inventory.main[0] = new ItemStack(Item.WOODEN_PICKAXE);
+			inventory.main[1] = new ItemStack(COBBLESTONE, 64, 0);
+			for (int slot = 2; slot < HOTBAR_SIZE; slot++) {
+				inventory.main[slot] = new ItemStack(GOLD, 64, 0);
+			}
+			inventory.main[MAIN_SLOT] = new ItemStack(WOOL, 64, 0);
+			inventory.selectedSlot = HOTBAR_SIZE - 1;
+			HotbarRestock.reset();
+
+			checkTrue("a full bar still takes the block", EasyPlace.interceptUse(mc));
+			check("the block the schematic does not use is the one given up", itemIdAt(inventory, 1), WOOL);
+			check("the tool is left alone", itemIdAt(inventory, 0), Item.WOODEN_PICKAXE.id);
+			// Somewhere in the inventory rather than a slot of its own: the container fills the first
+			// free one, which is not the slot the block came out of.
+			checkTrue("and what was given up went to the inventory",
+					mainInventorySlotOf(inventory, COBBLESTONE) >= HOTBAR_SIZE);
+
+			// A bar with nothing to spare - tools, and the block in hand - keeps all of it.
+			clearInventory(inventory);
+			for (int slot = 0; slot < HOTBAR_SIZE - 1; slot++) {
+				inventory.main[slot] = new ItemStack(Item.WOODEN_PICKAXE);
+			}
+			inventory.main[HOTBAR_SIZE - 1] = new ItemStack(GOLD, 64, 0);
+			inventory.main[MAIN_SLOT] = new ItemStack(WOOL, 64, 0);
+			inventory.selectedSlot = HOTBAR_SIZE - 1;
+			HotbarRestock.reset();
+
+			checkTrue("a bar with nothing to spare takes nothing", EasyPlace.interceptUse(mc));
+			check("and keeps the tools", itemIdAt(inventory, 0), Item.WOODEN_PICKAXE.id);
+			check("leaving the block where it was", itemIdAt(inventory, MAIN_SLOT), WOOL);
+		} finally {
+			schematic.setBlockId(2, 0, 2, savedBlock);
+			schematic.setMetadata(2, 0, 2, savedMetadata);
+			System.arraycopy(saved, 0, inventory.main, 0, saved.length);
+			inventory.selectedSlot = GOLD_SLOT;
+			HotbarRestock.reset();
+			Schematica.STATE.needsUpdate = true;
+		}
+	}
+
+	private static void clearInventory(PlayerInventory inventory) {
+		for (int slot = 0; slot < inventory.main.length; slot++) {
+			inventory.main[slot] = null;
+		}
+	}
+
+	/** The item in a slot, or 0 for an empty one, so an empty slot reads as a value like any other. */
+	private static int itemIdAt(PlayerInventory inventory, int slot) {
+		ItemStack stack = inventory.main[slot];
+		return stack == null ? 0 : stack.itemId;
+	}
+
+	private static int mainInventorySlotOf(PlayerInventory inventory, int itemId) {
+		for (int slot = HOTBAR_SIZE; slot < inventory.main.length; slot++) {
+			if (itemIdAt(inventory, slot) == itemId) {
+				return slot;
+			}
+		}
+		return -1;
 	}
 
 	private static class_27 hitResult(int x, int y, int z, int side) {

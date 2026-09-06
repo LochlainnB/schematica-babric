@@ -112,6 +112,12 @@ public final class EasyPlace {
 			return false;
 		}
 
+		// Checked after the block has had its say, so a swap in the air never costs the player a
+		// chest: what it holds back is the placement, not the click.
+		if (HotbarRestock.isBusy()) {
+			return true;
+		}
+
 		return !place(mc, hit);
 	}
 
@@ -169,15 +175,19 @@ public final class EasyPlace {
 			return false;
 		}
 
-		return selectItem(mc.player.inventory, wantedId, wantedMetadata);
+		return selectItem(mc, wantedId, wantedMetadata);
 	}
 
 	/**
-	 * Selects the hotbar slot holding the block. Beta has no click that moves an item into the
-	 * hotbar in one go, so what is not on the bar is out of reach, and easy place treats that the
-	 * same as not having the block at all.
+	 * Puts the block in the player's hand: the hotbar slot holding it, or a swap that brings it onto
+	 * the bar from the rest of the inventory.
+	 *
+	 * <p>A swap costs the click that found it - the block is not in hand until the slots have moved,
+	 * and on a server not until it has agreed - so this returns false and the next click places.
+	 * Holding the button down, that is one tick later.
 	 */
-	private static boolean selectItem(PlayerInventory inventory, int blockId, int metadata) {
+	private static boolean selectItem(Minecraft mc, int blockId, int metadata) {
+		PlayerInventory inventory = mc.player.inventory;
 		int itemId = itemFor(blockId);
 		Item item = itemAt(itemId);
 		if (item == null) {
@@ -186,19 +196,27 @@ public final class EasyPlace {
 
 		boolean matchDamage = damageCanGive(item, metadata);
 		for (int slot = 0; slot < HOTBAR_SIZE; slot++) {
-			ItemStack stack = inventory.main[slot];
-			if (stack == null || stack.itemId != itemId) {
-				continue;
+			if (matches(inventory.main[slot], item, itemId, metadata, matchDamage)) {
+				inventory.selectedSlot = slot;
+				return true;
 			}
-			if (matchDamage && item.method_470(stack.getDamage()) != metadata) {
-				continue;
-			}
+		}
 
-			inventory.selectedSlot = slot;
-			return true;
+		for (int slot = HOTBAR_SIZE; slot < inventory.main.length; slot++) {
+			if (matches(inventory.main[slot], item, itemId, metadata, matchDamage)) {
+				HotbarRestock.moveToHotbar(mc, slot);
+				return false;
+			}
 		}
 
 		return false;
+	}
+
+	private static boolean matches(ItemStack stack, Item item, int itemId, int metadata, boolean matchDamage) {
+		if (stack == null || stack.itemId != itemId) {
+			return false;
+		}
+		return !matchDamage || item.method_470(stack.getDamage()) == metadata;
 	}
 
 	/**
@@ -220,7 +238,7 @@ public final class EasyPlace {
 	}
 
 	/** The item that places a block, or -1 if nothing does. */
-	private static int itemFor(int blockId) {
+	static int itemFor(int blockId) {
 		for (int[] pair : BLOCK_ITEMS) {
 			if (pair[0] == blockId) {
 				return pair[1];
@@ -239,9 +257,11 @@ public final class EasyPlace {
 	 * something else entirely and is left alone.
 	 */
 	private static boolean isPlacement(ItemStack stack) {
-		if (stack == null) {
-			return true;
-		}
+		return stack == null || isBlockItem(stack);
+	}
+
+	/** Whether this stack is something that puts a block down, rather than a tool or a meal. */
+	static boolean isBlockItem(ItemStack stack) {
 		if (itemAt(stack.itemId) instanceof class_533) {
 			return true;
 		}

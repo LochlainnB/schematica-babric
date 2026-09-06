@@ -361,6 +361,8 @@ public class SchematicaState {
 	public void onWorldChanged() {
 		this.clearSchematic();
 		this.isRenderingGuide = false;
+		// Any swap still waiting on the old server will never be answered now.
+		HotbarRestock.reset();
 		SchematicRenderer renderer = Schematica.getRenderer();
 		if (renderer != null) {
 			renderer.invalidate();

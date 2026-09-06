@@ -79,12 +79,31 @@ What it deliberately leaves alone:
   nothing on the hotbar could carry it, like which way a piston ends up facing, it is ignored and
   the block goes down.
 
-The block has to be **on the hotbar**: Beta has no click that moves an item into the hotbar in one
-go, so a stack only in the main inventory is out of reach, and easy place treats that the same as
-not having the block at all.
-
 Everything is decided before the click reaches the interaction manager, so a click that is dropped
 never becomes a placement packet - the mode behaves the same on a server as in single player.
+
+#### Taking blocks off the hotbar
+
+Blocks are fetched from the rest of your inventory, not just the bar. When what the schematic wants
+is somewhere in your pack, it is moved onto the bar and the click that found it is spent doing so -
+holding the button down, that is one tick before it builds.
+
+Something has to come off the bar to make room, and what goes is deliberate: never a tool, a bucket
+or anything else that is not a block, and never what is in your hand. A block this schematic uses
+nowhere goes first, since it is left over from something else. If the bar has nothing to spare,
+nothing is taken and nothing is built - your hotbar is left as you arranged it.
+
+The move is made with shift clicks, which pass a stack between the bar and the pack **without it
+ever going through the cursor**. That is the whole reason for the choice. The obvious sequence -
+pick the stack up, put it down on the bar, put the displaced one back - leaves a stack on the cursor
+between clicks, and a cursor still holding something is dropped on the floor the moment any
+container closes. Shift clicks have no such half-finished state, so a click a server turns down is a
+click that did nothing.
+
+On a server the move is a request rather than a fact, so easy place places nothing until the server
+has answered it: what is in hand is not settled until then. Beta's client keeps no note of which
+clicks are outstanding, so the mod reads the server's answers off the wire itself. A refusal costs a
+round trip and a retry, never an item.
 
 ### Coordinates
 
@@ -191,10 +210,11 @@ gui/         AxisScreen          routes clicks, keys and the tab order to the fo
              SchematicaKeysScreen  rebinds the mod's keys, which vanilla's screen cannot fit
              four more Screens and a slider widget
 compat/      ModMenuIntegration  optional, loaded only when Mod Menu asks for it
-mixin/       five small hooks (see below)
+mixin/       six small hooks (see below)
 SchematicaState    everything about the current session
 SchematicaConfig   the render settings, and the keybinds it hands to vanilla
 EasyPlace          what a right click is allowed to do while easy place is on
+HotbarRestock      brings a block onto the hotbar, and waits for the server to agree
 ```
 
 `Schematic` is deliberately free of world and rendering state, so a future material list, printer or
@@ -209,6 +229,7 @@ format converter can work on it directly.
 | `GameRendererMixin`         | `class_555.method_1847` (weather) | the one point inside the world pass with the camera set up      |
 | `WorldMixin`                | `World.method_243`              | invalidate the overlay when a block inside it changes           |
 | `TranslationStorageAccessor`| `TranslationStorage`            | merge this mod's language file into the vanilla table           |
+| `ClientNetworkHandlerMixin` | the transaction packet          | hear whether the server took an inventory swap                  |
 
 The weather hook is the same place the ModLoader version attached itself: it runs after the terrain,
 entities and block outline are drawn, with the modelview matrix still in camera space.
@@ -256,6 +277,19 @@ asked what would become of the click. A click at the right position goes through
 block in hand, and one at a position that is empty in the schematic, already built, outside the
 layer slice, made with a tool in hand, or against a block that handles right clicks itself is each
 checked separately, so a rule that stopped working would be named rather than just missed.
+
+Bringing a block onto the hotbar is checked the same way, including which slot is given up for it:
+never a tool, never what is in hand, and a block this schematic uses nowhere before one it needs.
+
+`./gradlew runClient -Psmoketest=multiplayer` joins a b1.7.3 server on `localhost:25565` instead of
+making a world, and checks easy place against it. This is the only way to exercise the half of the
+inventory swap that exists on a server and nowhere else - the asking, and the being answered - since
+in single player a slot click is applied on the spot. It checks that the swap goes out and waits,
+that the server takes it, that the block is still on the hotbar once it has, and that the block then
+placed is still there a couple of seconds later rather than taken back off the player. Any swap the
+server turns down fails the run. `scratchpad/mptest.sh` in the session's temp directory starts the
+server, joins with the dev client and hands out the items; the server jar is the vanilla one from
+the loom cache and runs on a modern JDK.
 
 The layer step - which the layer keys and the move screen's buttons share - is checked at both ends
 of the range, including that a step past the end rebuilds nothing. The mod's controls screen is
