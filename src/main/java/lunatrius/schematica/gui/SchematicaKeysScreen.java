@@ -20,7 +20,11 @@ import org.lwjgl.input.Keyboard;
  */
 public class SchematicaKeysScreen extends Screen {
 	private static final int BUTTON_WIDTH = 70;
-	private static final int ROW_HEIGHT = 22;
+	private static final int BUTTON_HEIGHT = 20;
+	/** Row pitch where there is room for it. Rows are packed tighter when there is not. */
+	private static final int MAX_ROW_HEIGHT = 22;
+	/** Top of the first row, clear of the title. */
+	private static final int ROWS_TOP = 36;
 	/** Gap between a key and the name of what it does. */
 	private static final int LABEL_GAP = 6;
 	private static final int DONE_ID = 200;
@@ -42,11 +46,11 @@ public class SchematicaKeysScreen extends Screen {
 
 		for (int i = 0; i < this.keybinds.size(); i++) {
 			this.buttons.add(new ButtonWidget(
-					i, this.rowX(), this.rowY(i), BUTTON_WIDTH, 20, this.keybinds.get(i).getKeyName()));
+					i, this.rowX(), this.rowY(i), BUTTON_WIDTH, BUTTON_HEIGHT, this.keybinds.get(i).getKeyName()));
 		}
 
 		this.btnDone = new ButtonWidget(
-				DONE_ID, this.width / 2 - 100, this.height / 6 + 168, 200, 20, Translations.get("schematic.done"));
+				DONE_ID, this.width / 2 - 100, this.doneY(), 200, BUTTON_HEIGHT, Translations.get("schematic.done"));
 		this.buttons.add(this.btnDone);
 	}
 
@@ -59,7 +63,30 @@ public class SchematicaKeysScreen extends Screen {
 	}
 
 	private int rowY(int index) {
-		return this.height / 6 + ROW_HEIGHT * index;
+		return ROWS_TOP + this.rowHeight() * index;
+	}
+
+	/**
+	 * Pitch of the rows, taken from the space there actually is between the title and the hint
+	 * rather than fixed. Another key added later then still lands on the screen at the smallest gui
+	 * scale, where the whole screen is 240 pixels tall.
+	 */
+	private int rowHeight() {
+		int rows = this.keybinds.size();
+		if (rows < 2) {
+			return MAX_ROW_HEIGHT;
+		}
+
+		int available = this.hintY() - 4 - ROWS_TOP - BUTTON_HEIGHT;
+		return Math.max(BUTTON_HEIGHT, Math.min(MAX_ROW_HEIGHT, available / (rows - 1)));
+	}
+
+	private int hintY() {
+		return this.doneY() - 12;
+	}
+
+	private int doneY() {
+		return this.height - 28;
 	}
 
 	@Override
@@ -118,7 +145,7 @@ public class SchematicaKeysScreen extends Screen {
 		}
 
 		this.drawCenteredTextWithShadow(
-				this.textRenderer, Translations.get("schematic.keys.hint"), this.width / 2, this.height / 6 + 156, 0xA0A0A0);
+				this.textRenderer, Translations.get("schematic.keys.hint"), this.width / 2, this.hintY(), 0xA0A0A0);
 
 		super.render(mouseX, mouseY, delta);
 	}

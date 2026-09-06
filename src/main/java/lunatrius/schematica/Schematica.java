@@ -93,6 +93,7 @@ public class Schematica implements ClientModInitializer {
 		boolean settings = CONFIG.keySettings.poll();
 		boolean layerUp = CONFIG.keyLayerUp.poll();
 		boolean layerDown = CONFIG.keyLayerDown.poll();
+		boolean easyPlace = CONFIG.keyEasyPlace.poll();
 
 		if (load) {
 			mc.setScreen(new SchematicLoadScreen(mc.currentScreen));
@@ -112,6 +113,11 @@ public class Schematica implements ClientModInitializer {
 			STATE.setRenderingLayer(STATE.renderingLayer + 1);
 		} else if (layerDown) {
 			STATE.setRenderingLayer(STATE.renderingLayer - 1);
+		} else if (easyPlace) {
+			STATE.toggleEasyPlace();
+			// The one thing the mod says out loud. Every other key changes something you can see;
+			// this one changes what a click does, which is invisible until a block refuses to go down.
+			mc.inGameHud.addChatMessage(EasyPlace.label());
 		}
 	}
 }

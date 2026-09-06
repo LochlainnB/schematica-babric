@@ -19,6 +19,7 @@ and save it back out as a schematic.
 | Numpad `.`     | Schematica Settings   | Open the settings screen                      |
 | Page Up        | Schematic Layer Up    | Show the next layer up                        |
 | Page Down      | Schematic Layer Down  | Show the next layer down                      |
+| Numpad `0`     | Easy Place            | Turn easy place on or off                     |
 
 Schematics live in `<game dir>/schematics`. The keys only work while you are in a world and no
 other screen is open. They are vanilla bindings, stored in `options.txt` rather than in the mod's
@@ -44,6 +45,46 @@ to showing all of them, and both directions stop at the ends rather than wrappin
 
 A schematic over 125,000 blocks opens on layer 1 rather than all layers, since that is where the
 overlay is cheap enough to fly around in.
+
+### Easy place
+
+With easy place on, a right click can only ever put down the block the schematic wants at the
+position being aimed at - and it puts that block in your hand first. Point at the face next to where
+a block belongs, click, and the right one goes down. Holding the button repeats every tick instead
+of vanilla's five, so a course goes in as fast as you can sweep along it.
+
+A click that would land anywhere else does nothing at all: no block, no arm swing. That covers a
+position the schematic leaves empty, one that is already built, and anything outside the current
+layer slice - so slicing to a course also fences the mode into it.
+
+The mode follows the overlay. With nothing loaded, or the schematic hidden, there is nothing to build
+against and easy place is off in every way you can feel: clicks are your own again and the faster
+repeat goes with them, so leaving the mode on does not quietly change how the rest of the world
+builds.
+
+What it deliberately leaves alone:
+
+- **Blocks that handle a right click themselves.** Chests, doors, buttons and the rest still open
+  and toggle with a stack of blocks in hand. Each block class is asked whether it overrides
+  vanilla's right-click handler rather than being looked up in a list, so a modded block is read the
+  same way as a vanilla one.
+- **Clicks that are not a placement.** Only an empty hand or a block in hand counts; a tool, a
+  bucket or a piece of food is something else and is passed straight through. An empty hand counts
+  because that click does nothing in vanilla anyway, and it is the case the hand switch is most
+  useful for.
+- **Orientation.** Stairs, torches and ladders still take their facing from where you stand and
+  which face you click, exactly as without the mod, so a wrongly turned block is still a wrong block
+  and still shows up orange. Metadata is only insisted on where the stack is what carries it - wool
+  colour, wood type, sapling type - and there the wrong stack is refused rather than placed. Where
+  nothing on the hotbar could carry it, like which way a piston ends up facing, it is ignored and
+  the block goes down.
+
+The block has to be **on the hotbar**: Beta has no click that moves an item into the hotbar in one
+go, so a stack only in the main inventory is out of reach, and easy place treats that the same as
+not having the block at all.
+
+Everything is decided before the click reaches the interaction manager, so a click that is dropped
+never becomes a placement packet - the mode behaves the same on a server as in single player.
 
 ### Coordinates
 
@@ -153,6 +194,7 @@ compat/      ModMenuIntegration  optional, loaded only when Mod Menu asks for it
 mixin/       five small hooks (see below)
 SchematicaState    everything about the current session
 SchematicaConfig   the render settings, and the keybinds it hands to vanilla
+EasyPlace          what a right click is allowed to do while easy place is on
 ```
 
 `Schematic` is deliberately free of world and rendering state, so a future material list, printer or
@@ -162,7 +204,7 @@ format converter can work on it directly.
 
 | Mixin                       | Target                          | Why                                                            |
 | --------------------------- | ------------------------------- | -------------------------------------------------------------- |
-| `MinecraftMixin`            | `init`, `tick`, world change    | initialise after the GL context exists; poll keys; reset state  |
+| `MinecraftMixin`            | `init`, `tick`, world change, use | initialise after the GL context exists; poll keys; reset state; easy place |
 | `GameOptionsMixin`          | `GameOptions.load`              | add the mod's keys to the list Controls and options.txt walk    |
 | `GameRendererMixin`         | `class_555.method_1847` (weather) | the one point inside the world pass with the camera set up      |
 | `WorldMixin`                | `World.method_243`              | invalidate the overlay when a block inside it changes           |
@@ -179,6 +221,8 @@ Behaviour is otherwise the same as 1.2.0.10; these are deliberate changes:
   schematic 300 blocks away meant a lot of clicking.
 - **The layer slice has keys of its own.** The original could only change it from the move screen,
   which meant opening a screen between every course.
+- **Easy place.** The original had nothing like it: every block was placed by hand, against a ghost
+  that was only ever a picture. See above for what it does and does not take over.
 - **Rotate and mirror move block entities.** The original left signs and chests at their old
   coordinates after a transform.
 - **A fresh dimension backs `SchematicWorld`.** The original passed the live world's dimension to
@@ -206,6 +250,12 @@ rotate/mirror tables in memory, checks that the keybinds reached the vanilla con
 rebinding one lands in `options.txt`, checks that Mod Menu resolved the entrypoint, then creates a
 world, builds a structure, saves it, loads it back, and screenshots the overlay, every screen, a
 rotation and a layer slice into `run/screenshots`. It prints `SMOKETEST: PASS` or `FAIL` and exits.
+
+Easy place is driven the way the mixin drives it: the hit result is pointed at a face and the mod is
+asked what would become of the click. A click at the right position goes through and leaves the
+block in hand, and one at a position that is empty in the schematic, already built, outside the
+layer slice, made with a tool in hand, or against a block that handles right clicks itself is each
+checked separately, so a rule that stopped working would be named rather than just missed.
 
 The layer step - which the layer keys and the move screen's buttons share - is checked at both ends
 of the range, including that a step past the end rebuilds nothing. The mod's controls screen is

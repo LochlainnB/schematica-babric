@@ -1,5 +1,6 @@
 package lunatrius.schematica.gui;
 
+import lunatrius.schematica.EasyPlace;
 import lunatrius.schematica.Schematica;
 import lunatrius.schematica.SchematicaState;
 import lunatrius.schematica.util.Translations;
@@ -35,6 +36,7 @@ public class SchematicControlScreen extends AxisScreen {
 	private ButtonWidget btnMove;
 	private ButtonWidget btnMirror;
 	private ButtonWidget btnRotate;
+	private ButtonWidget btnEasyPlace;
 	private ButtonWidget btnSettings;
 
 	@Override
@@ -57,6 +59,9 @@ public class SchematicControlScreen extends AxisScreen {
 		this.btnMove = this.addButton(id++, this.width - 90, this.height - 80, 80, 20, Translations.get("schematic.movehere"));
 		this.btnMirror = this.addButton(id++, this.width - 90, this.height - 55, 80, 20, Translations.get("schematic.flip"));
 		this.btnRotate = this.addButton(id++, this.width - 90, this.height - 30, 80, 20, Translations.get("schematic.rotate"));
+
+		// Easy place has a key of its own, but nothing on screen otherwise says whether it is on.
+		this.btnEasyPlace = this.addButton(id++, 10, this.height - 55, 100, 20, EasyPlace.label());
 
 		// The settings otherwise only open through Mod Menu, which is optional.
 		this.btnSettings = this.addButton(id, 10, this.height - 30, 80, 20, Translations.get("schematic.settings"));
@@ -96,6 +101,9 @@ public class SchematicControlScreen extends AxisScreen {
 			this.state.mirrorSchematic();
 		} else if (button == this.btnRotate) {
 			this.state.rotateSchematic();
+		} else if (button == this.btnEasyPlace) {
+			this.state.toggleEasyPlace();
+			this.btnEasyPlace.text = EasyPlace.label();
 		} else if (button == this.btnSettings) {
 			this.minecraft.setScreen(new SchematicaSettingsScreen(this));
 		}

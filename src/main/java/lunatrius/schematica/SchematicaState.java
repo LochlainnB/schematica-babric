@@ -56,6 +56,13 @@ public class SchematicaState {
 	public boolean isRenderingSchematic = false;
 	public boolean isRenderingGuide = false;
 
+	/**
+	 * Easy place: a right click may only put down the block the schematic wants where it wants it.
+	 * Session state rather than a setting, like the render toggles above - it is a mode the player
+	 * steps in and out of while building, not something to come back to a week later.
+	 */
+	public boolean isEasyPlace = false;
+
 	/** Set whenever the cached geometry is stale and must be rebuilt next frame. */
 	public boolean needsUpdate = true;
 
@@ -260,6 +267,14 @@ public class SchematicaState {
 	 */
 	public void toggleRendering() {
 		this.isRenderingSchematic = !this.isRenderingSchematic && this.schematic != null;
+	}
+
+	/**
+	 * Turns easy place on or off. Allowed with nothing loaded: without a schematic the mode simply
+	 * has nothing to hold clicks against, and it is still the mode the player asked for.
+	 */
+	public void toggleEasyPlace() {
+		this.isEasyPlace = !this.isEasyPlace;
 	}
 
 	public void mirrorSchematic() {

@@ -40,10 +40,12 @@ public class SchematicaConfig {
 	public final Keybind keyLayerUp = new Keybind("key.layerup", "key.schematica.layerup", Keyboard.KEY_PRIOR);
 	/** Page Down */
 	public final Keybind keyLayerDown = new Keybind("key.layerdown", "key.schematica.layerdown", Keyboard.KEY_NEXT);
+	/** Numpad 0 */
+	public final Keybind keyEasyPlace = new Keybind("key.easyplace", "key.schematica.easyplace", Keyboard.KEY_NUMPAD0);
 
 	private final List<Keybind> keybinds = Collections.unmodifiableList(Arrays.asList(
 			this.keyLoad, this.keySave, this.keyControl, this.keyToggle, this.keySettings,
-			this.keyLayerUp, this.keyLayerDown));
+			this.keyLayerUp, this.keyLayerDown, this.keyEasyPlace));
 
 	/** Opacity used for schematic block entities and the highlight boxes. */
 	public float alpha = 1.0F;

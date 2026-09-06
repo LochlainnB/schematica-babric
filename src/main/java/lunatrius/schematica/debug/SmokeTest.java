@@ -4,6 +4,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
+import lunatrius.schematica.EasyPlace;
 import lunatrius.schematica.Schematica;
 import lunatrius.schematica.SchematicaConfig;
 import lunatrius.schematica.SchematicaState;
@@ -15,21 +16,27 @@ import lunatrius.schematica.gui.SchematicaSettingsScreen;
 import lunatrius.schematica.render.SchematicRenderer;
 import lunatrius.schematica.schematic.Schematic;
 import lunatrius.schematica.schematic.SchematicFormat;
+import lunatrius.schematica.schematic.SchematicWorld;
 import lunatrius.schematica.util.Log;
 import lunatrius.schematica.util.Translations;
 import lunatrius.schematica.util.Vec3i;
 import net.fabricmc.loader.api.metadata.ModMetadata;
+import net.minecraft.Item;
 import net.minecraft.SingleplayerInteractionManager;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.SignBlockEntity;
 import net.minecraft.class_260;
+import net.minecraft.class_27;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.TitleScreen;
 import net.minecraft.client.gui.screen.option.KeybindsScreen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.option.KeyBinding;
+import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 import org.lwjgl.input.Keyboard;
 
@@ -55,6 +62,17 @@ public final class SmokeTest {
 	private static final int TORCH = 50;
 	private static final int WOOD_STAIRS = 53;
 	private static final int STANDING_SIGN = 63;
+	private static final int WORKBENCH = 58;
+	private static final int WOOL = 35;
+	private static final int RED_WOOL = 14;
+	private static final int PISTON = 33;
+
+	private static final int HOTBAR_SIZE = 9;
+	private static final int GOLD_SLOT = 3;
+	private static final int PICKAXE_SLOT = 5;
+	/** Faces of the block a click lands on, in vanilla's order. */
+	private static final int SIDE_UP = 1;
+	private static final int SIDE_EAST = 5;
 
 	/** Give up rather than hang forever if world generation never finishes. */
 	private static final int WORLD_TIMEOUT_TICKS = 20 * 60 * 8;
@@ -300,8 +318,9 @@ public final class SmokeTest {
 		checkTrue("settings binding is in the controls list", indexOf(all, config.keySettings.binding) >= 0);
 		checkTrue("layer up binding is in the controls list", indexOf(all, config.keyLayerUp.binding) >= 0);
 		checkTrue("layer down binding is in the controls list", indexOf(all, config.keyLayerDown.binding) >= 0);
-		check("controls list length", all.length, 17);
-		check("every binding the mod owns is listed", config.getKeybinds().size(), 7);
+		checkTrue("easy place binding is in the controls list", indexOf(all, config.keyEasyPlace.binding) >= 0);
+		check("controls list length", all.length, 18);
+		check("every binding the mod owns is listed", config.getKeybinds().size(), 8);
 
 		// A raw key would show up on the controls screen as the untranslated key, which is the usual
 		// symptom of a language file that never made it into the vanilla table.
@@ -558,6 +577,7 @@ public final class SmokeTest {
 			case 0: // as loaded -> rotate it
 				runOverlayUpdateTests();
 				runLayerTests();
+				runEasyPlaceTests(mc);
 				runCoordinateFieldTests(mc);
 				state.rotateSchematic();
 				Log.info("SMOKETEST: scene 1 - rotated");
@@ -750,6 +770,213 @@ public final class SmokeTest {
 		check("the layer is back where it started", state.renderingLayer, saved);
 
 		Log.info("SMOKETEST: --- layers done ---");
+	}
+
+	/**
+	 * Easy place, driven the way the mixin drives it: point the hit result at a face and ask what
+	 * would happen to the click. The mouse itself cannot be faked from inside a tick, but everything
+	 * downstream of it - the target position, the schematic lookup and the hand switch - is here.
+	 */
+	private static void runEasyPlaceTests(Minecraft mc) {
+		SchematicaState state = Schematica.STATE;
+		if (state.schematic == null || mc.player == null) {
+			Log.info("SMOKETEST: no schematic loaded, skipping the easy place checks");
+			return;
+		}
+
+		Log.info("SMOKETEST: --- easy place ---");
+
+		World world = mc.world;
+		PlayerInventory inventory = mc.player.inventory;
+
+		boolean savedMode = state.isEasyPlace;
+		int savedLayer = state.renderingLayer;
+		int savedSlot = inventory.selectedSlot;
+		ItemStack[] savedHotbar = new ItemStack[HOTBAR_SIZE];
+		System.arraycopy(inventory.main, 0, savedHotbar, 0, HOTBAR_SIZE);
+		class_27 savedHit = mc.field_2823;
+
+		// The ghost is parked clear of the built structure, so its own space is free to write into.
+		int x = state.offset.x + 2;
+		int y = state.offset.y;
+		int z = state.offset.z + 2;
+		int[][] touched = { { x, y, z }, { x - 1, y, z }, { x - 1, y + 1, z } };
+		int[] savedBlocks = new int[touched.length];
+		int[] savedMetadata = new int[touched.length];
+		for (int i = 0; i < touched.length; i++) {
+			savedBlocks[i] = world.getBlockId(touched[i][0], touched[i][1], touched[i][2]);
+			savedMetadata[i] = world.method_1778(touched[i][0], touched[i][1], touched[i][2]);
+		}
+
+		try {
+			// A gap in the ghost's floor with a block beside it to click on. The schematic wants gold
+			// in the gap, so a click across that face is the one placement easy place should allow.
+			world.method_201(x, y, z, 0, 0);
+			world.method_201(x - 1, y, z, GOLD, 0);
+			world.method_201(x - 1, y + 1, z, 0, 0);
+			check("the schematic wants gold in the gap", state.schematic.getBlockId(2, 0, 2), GOLD);
+			check("the schematic wants nothing above it", state.schematic.getBlockId(1, 1, 2), 0);
+
+			for (int slot = 0; slot < HOTBAR_SIZE; slot++) {
+				inventory.main[slot] = null;
+			}
+			inventory.main[GOLD_SLOT] = new ItemStack(GOLD, 64, 0);
+			inventory.main[PICKAXE_SLOT] = new ItemStack(Item.WOODEN_PICKAXE);
+			inventory.selectedSlot = 0;
+
+			mc.field_2823 = hitResult(x - 1, y, z, SIDE_EAST);
+
+			state.isEasyPlace = false;
+			checkTrue("a click is left alone while easy place is off", !EasyPlace.interceptUse(mc));
+			check("and nothing is put in hand", inventory.selectedSlot, 0);
+
+			// Empty handed, which is the case the hand switch is really for.
+			state.isEasyPlace = true;
+			checkTrue("a click at the right position goes through", !EasyPlace.interceptUse(mc));
+			check("the block the schematic wants is put in hand", inventory.selectedSlot, GOLD_SLOT);
+
+			// Same aim, but the block is now standing there: the click has nothing left to do.
+			world.method_201(x, y, z, GOLD, 0);
+			checkTrue("a block already built is not placed again", EasyPlace.interceptUse(mc));
+			world.method_201(x, y, z, 0, 0);
+
+			// Aimed at the top face instead, where the schematic wants nothing at all.
+			mc.field_2823 = hitResult(x - 1, y, z, SIDE_UP);
+			checkTrue("a click the schematic has no block for is dropped", EasyPlace.interceptUse(mc));
+
+			// The same click with a tool in hand is not a placement, so it is not easy place's to take.
+			inventory.selectedSlot = PICKAXE_SLOT;
+			checkTrue("a click with a tool in hand is left alone", !EasyPlace.interceptUse(mc));
+			check("and the tool stays in hand", inventory.selectedSlot, PICKAXE_SLOT);
+			inventory.selectedSlot = GOLD_SLOT;
+
+			// A block that does something of its own with a right click keeps it, or a workbench in
+			// the way of a build would stop opening as soon as the mode was turned on.
+			world.method_201(x - 1, y, z, WORKBENCH, 0);
+			checkTrue("a block that handles right clicks keeps them", !EasyPlace.interceptUse(mc));
+			world.method_201(x - 1, y, z, GOLD, 0);
+
+			// Only the course being built is a target, so a slice above it takes the gap out of reach.
+			mc.field_2823 = hitResult(x - 1, y, z, SIDE_EAST);
+			state.setRenderingLayer(1);
+			checkTrue("a position outside the layer slice is not a target", EasyPlace.interceptUse(mc));
+			state.setRenderingLayer(savedLayer);
+
+			runMetadataMatchTests(mc);
+
+			// Everything above asks the mod what it would do. The rest goes through the client's own
+			// click handler, which is what the mixin hangs off, so a block really does or does not
+			// end up in the world - and the same click is made twice to show that what changed is
+			// easy place rather than the aim.
+			mc.field_2823 = hitResult(x - 1, y, z, SIDE_UP);
+			inventory.selectedSlot = GOLD_SLOT;
+			state.isEasyPlace = false;
+			rightClick(mc);
+			check("vanilla puts a block there", world.getBlockId(x - 1, y + 1, z), GOLD);
+			world.method_201(x - 1, y + 1, z, 0, 0);
+
+			state.isEasyPlace = true;
+			rightClick(mc);
+			check("easy place drops the same click", world.getBlockId(x - 1, y + 1, z), 0);
+
+			// Empty handed at the one position the schematic does want a block.
+			mc.field_2823 = hitResult(x - 1, y, z, SIDE_EAST);
+			inventory.selectedSlot = 0;
+			rightClick(mc);
+			check("a click at the right position builds it", world.getBlockId(x, y, z), GOLD);
+			check("out of the slot the schematic asked for", inventory.selectedSlot, GOLD_SLOT);
+			world.method_201(x, y, z, 0, 0);
+
+			check("easy place places every tick", (int) EasyPlace.useRepeatDivisor(4.0F), 20);
+
+			// The faster rate has to be tied to the same thing the click gate is. With nothing to
+			// build against, a mode that is still on must not leave the player placing at four times
+			// vanilla's speed everywhere else in the world.
+			state.isRenderingSchematic = false;
+			check("no faster placing with the schematic hidden", (int) EasyPlace.useRepeatDivisor(4.0F), 4);
+			state.isRenderingSchematic = true;
+
+			SchematicWorld loaded = state.schematic;
+			state.schematic = null;
+			check("no faster placing with nothing loaded", (int) EasyPlace.useRepeatDivisor(4.0F), 4);
+			state.schematic = loaded;
+
+			state.isEasyPlace = false;
+			check("and vanilla's rate is back when it is off", (int) EasyPlace.useRepeatDivisor(4.0F), 4);
+		} finally {
+			for (int i = 0; i < touched.length; i++) {
+				world.method_201(touched[i][0], touched[i][1], touched[i][2], savedBlocks[i], savedMetadata[i]);
+			}
+			System.arraycopy(savedHotbar, 0, inventory.main, 0, HOTBAR_SIZE);
+			inventory.selectedSlot = savedSlot;
+			mc.field_2823 = savedHit;
+			state.setRenderingLayer(savedLayer);
+			state.isEasyPlace = savedMode;
+		}
+
+		Log.info("SMOKETEST: --- easy place done ---");
+	}
+
+	/**
+	 * Which stack easy place reaches for when several could place the same block. Wool takes its
+	 * colour from the stack, so the wrong one is the wrong block; a piston takes its facing from how
+	 * it is placed, and insisting on a stack that matches would refuse to place one at all.
+	 *
+	 * <p>Called with the aim already set at a gap the schematic has a block for, and puts the
+	 * schematic back the way it found it.
+	 */
+	private static void runMetadataMatchTests(Minecraft mc) {
+		Schematic schematic = Schematica.STATE.schematic.getSchematic();
+		PlayerInventory inventory = mc.player.inventory;
+		int savedBlock = schematic.getBlockId(2, 0, 2);
+		int savedMetadata = schematic.getMetadata(2, 0, 2);
+
+		try {
+			schematic.setBlockId(2, 0, 2, WOOL);
+			schematic.setMetadata(2, 0, 2, RED_WOOL);
+
+			inventory.main[GOLD_SLOT] = new ItemStack(WOOL, 64, 0);
+			inventory.selectedSlot = 0;
+			checkTrue("the wrong colour of wool is not placed", EasyPlace.interceptUse(mc));
+
+			inventory.main[GOLD_SLOT] = new ItemStack(WOOL, 64, RED_WOOL);
+			checkTrue("the right colour of wool is", !EasyPlace.interceptUse(mc));
+			check("and it is the one put in hand", inventory.selectedSlot, GOLD_SLOT);
+
+			// A piston reports metadata 7 whatever the stack, so nothing in the hotbar can ever match
+			// the facing the schematic wants - and it still has to go down.
+			schematic.setBlockId(2, 0, 2, PISTON);
+			schematic.setMetadata(2, 0, 2, 3);
+			inventory.main[GOLD_SLOT] = new ItemStack(PISTON, 64, 0);
+			inventory.selectedSlot = 0;
+			checkTrue("a block whose metadata is not in the stack is still placed", !EasyPlace.interceptUse(mc));
+			check("and that stack is put in hand", inventory.selectedSlot, GOLD_SLOT);
+		} finally {
+			schematic.setBlockId(2, 0, 2, savedBlock);
+			schematic.setMetadata(2, 0, 2, savedMetadata);
+			inventory.main[GOLD_SLOT] = new ItemStack(GOLD, 64, 0);
+			inventory.selectedSlot = GOLD_SLOT;
+			Schematica.STATE.needsUpdate = true;
+		}
+	}
+
+	private static class_27 hitResult(int x, int y, int z, int side) {
+		return new class_27(x, y, z, side, Vec3d.createCached(x, y, z));
+	}
+
+	/**
+	 * The client's own handler for a right click on the world - the method the easy place mixin
+	 * injects into. Reached by reflection because it is private, exactly as the coordinate rows are
+	 * driven through the screens' protected handlers.
+	 */
+	private static void rightClick(Minecraft mc) {
+		try {
+			java.lang.reflect.Method use = Minecraft.class.getDeclaredMethod("method_2107", int.class);
+			use.setAccessible(true);
+			use.invoke(mc, 1);
+		} catch (ReflectiveOperationException exception) {
+			fail("could not drive the right click handler", exception);
+		}
 	}
 
 	/**
