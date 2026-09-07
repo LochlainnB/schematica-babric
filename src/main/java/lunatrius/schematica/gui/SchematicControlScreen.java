@@ -37,6 +37,7 @@ public class SchematicControlScreen extends AxisScreen {
 	private ButtonWidget btnMirror;
 	private ButtonWidget btnRotate;
 	private ButtonWidget btnEasyPlace;
+	private ButtonWidget btnMaterials;
 	private ButtonWidget btnSettings;
 
 	@Override
@@ -60,6 +61,9 @@ public class SchematicControlScreen extends AxisScreen {
 		this.btnMirror = this.addButton(id++, this.width - 90, this.height - 55, 80, 20, Translations.get("schematic.flip"));
 		this.btnRotate = this.addButton(id++, this.width - 90, this.height - 30, 80, 20, Translations.get("schematic.rotate"));
 
+		// What the schematic is built out of, and how much of it is already in the pack.
+		this.btnMaterials = this.addButton(id++, 10, this.height - 80, 100, 20, Translations.get("schematic.materials"));
+
 		// Easy place has a key of its own, but nothing on screen otherwise says whether it is on.
 		this.btnEasyPlace = this.addButton(id++, 10, this.height - 55, 100, 20, EasyPlace.label());
 
@@ -72,6 +76,7 @@ public class SchematicControlScreen extends AxisScreen {
 		this.btnHide.active = hasSchematic;
 		this.btnMirror.active = hasSchematic;
 		this.btnRotate.active = hasSchematic;
+		this.btnMaterials.active = hasSchematic;
 	}
 
 	private String hideButtonLabel() {
@@ -101,6 +106,8 @@ public class SchematicControlScreen extends AxisScreen {
 			this.state.mirrorSchematic();
 		} else if (button == this.btnRotate) {
 			this.state.rotateSchematic();
+		} else if (button == this.btnMaterials) {
+			this.minecraft.setScreen(new MaterialListScreen(this));
 		} else if (button == this.btnEasyPlace) {
 			this.state.toggleEasyPlace();
 			this.btnEasyPlace.text = EasyPlace.label();

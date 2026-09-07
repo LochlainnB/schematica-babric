@@ -6,7 +6,8 @@ A port of Lunatrius' Schematica 1.2.0.10 for Minecraft Beta 1.7.3 from Risugami'
 
 Load an MCEdit `.schematic` file and it is drawn over the world as a ghost you can build against,
 with colour-coded boxes showing what is missing or wrong. You can also select a region of the world
-and save it back out as a schematic.
+and save it back out as a schematic. A material list says what the whole thing will take, and
+counts down as you gather it.
 
 ## Using it
 
@@ -20,6 +21,7 @@ and save it back out as a schematic.
 | Page Up        | Schematic Layer Up    | Show the next layer up                        |
 | Page Down      | Schematic Layer Down  | Show the next layer down                      |
 | Numpad `0`     | Easy Place            | Turn easy place on or off                     |
+| Numpad `5`     | Material List         | What the schematic is built out of             |
 
 Schematics live in `<game dir>/schematics`. The keys only work while you are in a world and no
 other screen is open. They are vanilla bindings, stored in `options.txt` rather than in the mod's
@@ -45,6 +47,27 @@ to showing all of them, and both directions stop at the ends rather than wrappin
 
 A schematic over 125,000 blocks opens on layer 1 rather than all layers, since that is where the
 overlay is cheap enough to fly around in.
+
+### Material list
+
+Everything the loaded schematic is built out of, in one list: what it takes, how much of it you are
+carrying and how much is still to be found. The **Materials** button on the move screen and Numpad
+`5` both open it.
+
+The rows are the items you would go and fetch rather than the blocks the schematic holds, which is
+the same question easy place asks when it puts a block in your hand - so a wall of redstone wire
+asks for redstone dust, a door asks for one door rather than its two halves, and a stack of white
+wool is a different row from a stack of red. Where the metadata is not something a stack carries -
+which way a piston ends up facing - every one of them is the same row, because any piston will do.
+
+The `Have` column is counted again every tick while the screen is open, so the numbers fall as you
+pick things up: empty a chest into your pack with the screen still open and you can watch what is
+left to gather come down. A spare stack is never a debt - having sixty-four of something the
+schematic wants ten of leaves nothing missing rather than a negative number - and a stack is only
+ever counted towards one row.
+
+The order is what the schematic takes most of first, and it holds still while you gather: sorting by
+what is missing would shuffle the rows about under you as the numbers changed.
 
 ### Easy place
 
@@ -227,6 +250,8 @@ gui/         AxisScreen          routes clicks, keys and the tab order to the fo
              AxisControls        one coordinate row: X: [value] [-] [step] [+]
              NumberFieldWidget   a text field holding a whole number
              SchematicaKeysScreen  rebinds the mod's keys, which vanilla's screen cannot fit
+             MaterialListScreen    what the schematic takes, against what is in the pack
+             MaterialListWidget    one row of it: the icon, the name and the two counts
              four more Screens and a slider widget
 compat/      ModMenuIntegration  optional, loaded only when Mod Menu asks for it
 mixin/       six small hooks (see below)
@@ -235,10 +260,13 @@ SchematicaConfig   the render settings, and the keybinds it hands to vanilla
 EasyPlace          what a right click is allowed to do while easy place is on
 HotbarRestock      brings a block onto the hotbar, and waits for the server to agree
 Sightline          walks the blocks along the line of sight, nearest first
+MaterialList       what a schematic is built out of, counted against an inventory
+BlockItems         which item puts a block down, and which stack of it
 ```
 
-`Schematic` is deliberately free of world and rendering state, so a future material list, printer or
-format converter can work on it directly.
+`Schematic` is deliberately free of world and rendering state, which is what lets `MaterialList`
+count one without a world in front of it - and what a future printer or format converter would
+work on the same way.
 
 ### The mixins
 
@@ -266,6 +294,9 @@ Behaviour is otherwise the same as 1.2.0.10; these are deliberate changes:
   that was only ever a picture. It also places where vanilla cannot - a block the schematic wants
   with nothing around it goes down in mid air - which is a placement the original could not make at
   all rather than one it made differently. See above for what it does and does not take over.
+- **A material list.** The original drew a schematic and left working out what it would take to
+  build entirely to you. This counts it, in the items you would go and fetch, and counts your
+  inventory against it.
 - **Rotate and mirror move block entities.** The original left signs and chests at their old
   coordinates after a transform.
 - **A fresh dimension backs `SchematicWorld`.** The original passed the live world's dimension to
@@ -310,6 +341,14 @@ around it, and nothing goes down where the schematic wants nothing, where the bl
 under it, where it would fall, or where something is in the way. A position an ordinary click could
 reach is checked to be left to the ordinary path, which is what keeps this from quietly taking over
 the common case.
+
+The material list is arithmetic over a schematic and an inventory, so it is checked with neither a
+world nor a screen: a schematic holding the three cases that make it more than a block count - an
+item that is not the block it places, a block put down by one item and standing as two, and one item
+whose stacks are different materials - is counted, then counted again against a pack that is filled
+in stages, which is the countdown itself. The screen over the top is opened for real on top of the
+loaded schematic and given a stack to find, so what the rows show is checked to be the schematic
+that is actually loaded rather than the one the test built.
 
 `./gradlew runClient -Psmoketest=multiplayer` joins a b1.7.3 server on `localhost:25565` instead of
 making a world, and checks easy place against it. This is the only way to exercise the half of the

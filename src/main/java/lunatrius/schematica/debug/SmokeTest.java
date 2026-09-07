@@ -6,9 +6,11 @@ import java.util.List;
 
 import lunatrius.schematica.EasyPlace;
 import lunatrius.schematica.HotbarRestock;
+import lunatrius.schematica.MaterialList;
 import lunatrius.schematica.Schematica;
 import lunatrius.schematica.SchematicaConfig;
 import lunatrius.schematica.SchematicaState;
+import lunatrius.schematica.gui.MaterialListScreen;
 import lunatrius.schematica.gui.SchematicControlScreen;
 import lunatrius.schematica.gui.SchematicLoadScreen;
 import lunatrius.schematica.gui.SchematicSaveScreen;
@@ -84,6 +86,10 @@ public final class SmokeTest {
 	private static final int SAND = 12;
 	private static final int REDSTONE_WIRE = 55;
 	private static final int REDSTONE_DUST = 331;
+	private static final int WOODEN_DOOR = 64;
+	private static final int WOODEN_DOOR_ITEM = 324;
+	/** The metadata bit the top half of a door carries, which no item places. */
+	private static final int DOOR_TOP = 8;
 
 	/** Nine blocks to fill the bar plus the gold, which is what the server is asked to hand out. */
 	private static final int TEST_STACKS = 10;
@@ -342,7 +348,143 @@ public final class SmokeTest {
 		check("dropped block count", result.droppedBlocks, 1);
 		check("dropped block became air", result.schematic.getBlockId(0, 0, 0), 0);
 
+		runMaterialListTests();
+
 		Log.info("SMOKETEST: --- data layer done ---");
+	}
+
+	/**
+	 * The material list, which is arithmetic over a schematic and an inventory and so needs no
+	 * world. Three things make it more than a count of blocks, and each is checked here: an item
+	 * that is not the block it places (redstone), a block put down by one item and standing as two
+	 * (a door), and one item whose stacks are different materials (wool colours).
+	 */
+	private static void runMaterialListTests() {
+		Log.info("SMOKETEST: --- material list ---");
+
+		int[][][] blocks = new int[2][3][2];
+		int[][][] metadata = new int[2][3][2];
+		blocks[0][0][0] = GOLD;
+		blocks[1][0][0] = GOLD;
+		blocks[0][0][1] = GOLD;
+		blocks[1][0][1] = REDSTONE_WIRE;
+		blocks[0][1][0] = WOOL;
+		blocks[1][1][0] = WOOL;
+		metadata[1][1][0] = RED_WOOL;
+		blocks[0][1][1] = WOODEN_DOOR;
+		blocks[0][2][1] = WOODEN_DOOR;
+		metadata[0][2][1] = DOOR_TOP;
+		// Two pistons facing different ways: the same stack puts down either, so they are one row.
+		blocks[1][2][0] = PISTON;
+		metadata[1][2][0] = 2;
+		blocks[1][2][1] = PISTON;
+		metadata[1][2][1] = 4;
+
+		MaterialList list = MaterialList.of(new Schematic(blocks, metadata, new ArrayList<>(), 2, 3, 2));
+
+		check("material rows", list.getEntries().size(), 6);
+		check("material total", list.getTotalNeeded(), 9);
+		check("gold needed", materialNeeded(list, GOLD, 0), 3);
+		check("wire is asked for as dust", materialNeeded(list, REDSTONE_DUST, 0), 1);
+		check("a door is one item, not two blocks", materialNeeded(list, WOODEN_DOOR_ITEM, 0), 1);
+		check("white wool needed", materialNeeded(list, WOOL, 0), 1);
+		check("red wool is a row of its own", materialNeeded(list, WOOL, RED_WOOL), 1);
+		check("both pistons are the one row", materialNeeded(list, PISTON, 0), 2);
+		checkTrue("the biggest pile is at the top", list.getEntries().get(0).getStack().itemId == GOLD);
+		checkText("rows are named the way the game names them",
+				materialRow(list, WOOL, RED_WOOL).getName(), "Red Wool");
+
+		// Nothing carried: everything is still to be gathered.
+		list.countInventory(new ItemStack[0]);
+		check("with an empty pack everything is missing", list.getTotalMissing(), 9);
+
+		ItemStack[] carried = new ItemStack[4];
+		carried[0] = new ItemStack(GOLD, 2, 0);
+		carried[1] = new ItemStack(WOOL, 5, RED_WOOL);
+		carried[2] = new ItemStack(Item.WOODEN_PICKAXE);
+		list.countInventory(carried);
+
+		check("gold in the pack", materialHave(list, GOLD, 0), 2);
+		check("so one gold block is still to be found", materialMissing(list, GOLD, 0), 1);
+		check("red wool went to its own row", materialHave(list, WOOL, RED_WOOL), 5);
+		check("and a spare stack is not a debt", materialMissing(list, WOOL, RED_WOOL), 0);
+		check("the white wool row did not take it", materialHave(list, WOOL, 0), 0);
+		check("what is left to gather", list.getTotalMissing(), 6);
+
+		// The whole point of the screen: the numbers fall as the blocks are picked up.
+		carried[0] = new ItemStack(GOLD, 3, 0);
+		list.countInventory(carried);
+		check("a row counts down as blocks are picked up", materialMissing(list, GOLD, 0), 0);
+		check("and so does the total", list.getTotalMissing(), 5);
+
+		check("an empty schematic has nothing in it", MaterialList.of(null).getTotalNeeded(), 0);
+
+		Log.info("SMOKETEST: --- material list done ---");
+	}
+
+	/** The row asking for a particular stack, by the item and damage it wants. */
+	private static MaterialList.Entry materialRow(MaterialList list, int itemId, int damage) {
+		for (MaterialList.Entry entry : list.getEntries()) {
+			if (entry.getStack().itemId == itemId && entry.getStack().getDamage() == damage) {
+				return entry;
+			}
+		}
+		return null;
+	}
+
+	private static int materialNeeded(MaterialList list, int itemId, int damage) {
+		MaterialList.Entry entry = materialRow(list, itemId, damage);
+		return entry == null ? -1 : entry.getNeeded();
+	}
+
+	private static int materialHave(MaterialList list, int itemId, int damage) {
+		MaterialList.Entry entry = materialRow(list, itemId, damage);
+		return entry == null ? -1 : entry.getHave();
+	}
+
+	private static int materialMissing(MaterialList list, int itemId, int damage) {
+		MaterialList.Entry entry = materialRow(list, itemId, damage);
+		return entry == null ? -1 : entry.getMissing();
+	}
+
+	/**
+	 * The screen over the top of the list: that it counts the schematic that is actually loaded,
+	 * and that its numbers fall as blocks are picked up, which is the whole point of it. Puts the
+	 * inventory and whatever screen was open back the way it found them.
+	 */
+	private static void runMaterialScreenTests(Minecraft mc) {
+		SchematicaState state = Schematica.STATE;
+		if (state.schematic == null || mc.player == null) {
+			Log.info("SMOKETEST: no schematic loaded, skipping the material list screen checks");
+			return;
+		}
+
+		Log.info("SMOKETEST: --- material list screen ---");
+		PlayerInventory inventory = mc.player.inventory;
+		ItemStack[] saved = inventory.main.clone();
+		Screen before = mc.currentScreen;
+		for (int slot = 0; slot < inventory.main.length; slot++) {
+			inventory.main[slot] = null;
+		}
+
+		// Opening the screen is what counts the schematic, exactly as the key and the button do.
+		MaterialListScreen screen = new MaterialListScreen(null);
+		mc.setScreen(screen);
+		MaterialList list = screen.getMaterials();
+
+		int gold = materialNeeded(list, GOLD, 0);
+		checkTrue("the screen counted the schematic that is loaded", gold > 0);
+		check("with an empty pack the whole schematic is still to be gathered",
+				list.getTotalMissing(), list.getTotalNeeded());
+
+		inventory.main[0] = new ItemStack(GOLD, 5, 0);
+		screen.tick();
+		check("the screen counts what the player picked up", materialHave(list, GOLD, 0), 5);
+		check("and takes it off what is missing", materialMissing(list, GOLD, 0), Math.max(0, gold - 5));
+
+		System.arraycopy(saved, 0, inventory.main, 0, saved.length);
+		mc.setScreen(before);
+		Log.info("SMOKETEST: --- material list screen done ---");
 	}
 
 	/** The mod's keys have to behave exactly like vanilla's once they are in the controls list. */
@@ -361,8 +503,9 @@ public final class SmokeTest {
 		checkTrue("layer up binding is in the controls list", indexOf(all, config.keyLayerUp.binding) >= 0);
 		checkTrue("layer down binding is in the controls list", indexOf(all, config.keyLayerDown.binding) >= 0);
 		checkTrue("easy place binding is in the controls list", indexOf(all, config.keyEasyPlace.binding) >= 0);
-		check("controls list length", all.length, 18);
-		check("every binding the mod owns is listed", config.getKeybinds().size(), 8);
+		checkTrue("material list binding is in the controls list", indexOf(all, config.keyMaterials.binding) >= 0);
+		check("controls list length", all.length, 19);
+		check("every binding the mod owns is listed", config.getKeybinds().size(), 9);
 
 		// A raw key would show up on the controls screen as the untranslated key, which is the usual
 		// symptom of a language file that never made it into the vanilla table.
@@ -1019,6 +1162,7 @@ public final class SmokeTest {
 				runLayerTests();
 				runEasyPlaceTests(mc);
 				runCoordinateFieldTests(mc);
+				runMaterialScreenTests(mc);
 				state.rotateSchematic();
 				Log.info("SMOKETEST: scene 1 - rotated");
 				return;
@@ -1049,30 +1193,34 @@ public final class SmokeTest {
 				Log.info("SMOKETEST: scene 6 - load screen");
 				return;
 			case 6:
-				mc.setScreen(new SchematicaSettingsScreen(null));
-				Log.info("SMOKETEST: scene 7 - settings screen");
+				mc.setScreen(new MaterialListScreen(null));
+				Log.info("SMOKETEST: scene 7 - material list");
 				return;
 			case 7:
-				mc.setScreen(new KeybindsScreen(null, mc.options));
-				Log.info("SMOKETEST: scene 8 - vanilla controls screen");
+				mc.setScreen(new SchematicaSettingsScreen(null));
+				Log.info("SMOKETEST: scene 8 - settings screen");
 				return;
 			case 8:
-				mc.setScreen(new SchematicaKeysScreen(null));
-				Log.info("SMOKETEST: scene 9 - the mod's controls screen");
+				mc.setScreen(new KeybindsScreen(null, mc.options));
+				Log.info("SMOKETEST: scene 9 - vanilla controls screen");
 				return;
 			case 9:
+				mc.setScreen(new SchematicaKeysScreen(null));
+				Log.info("SMOKETEST: scene 10 - the mod's controls screen");
+				return;
+			case 10:
 				if (openModList(mc)) {
-					Log.info("SMOKETEST: scene 10 - mod menu list");
+					Log.info("SMOKETEST: scene 11 - mod menu list");
 					return;
 				}
 				Log.info("SMOKETEST: Mod Menu is not installed, moving on");
 				// falls through when Mod Menu is not installed
-			case 10:
+			case 11:
 				// Guarded rather than plain, because the case above can fall into it.
 				loadLargeSchematic(mc);
 				return;
-			case 11:
 			case 12:
+			case 13:
 				cameraYaw += 50.0F;
 				Log.info("SMOKETEST: scene " + scene + " - the same schematic, camera turned to "
 						+ (int) cameraYaw + " degrees");

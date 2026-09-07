@@ -2,6 +2,7 @@ package lunatrius.schematica;
 
 import java.io.File;
 
+import lunatrius.schematica.gui.MaterialListScreen;
 import lunatrius.schematica.gui.SchematicControlScreen;
 import lunatrius.schematica.gui.SchematicLoadScreen;
 import lunatrius.schematica.gui.SchematicSaveScreen;
@@ -98,6 +99,7 @@ public class Schematica implements ClientModInitializer {
 		boolean layerUp = CONFIG.keyLayerUp.poll();
 		boolean layerDown = CONFIG.keyLayerDown.poll();
 		boolean easyPlace = CONFIG.keyEasyPlace.poll();
+		boolean materials = CONFIG.keyMaterials.poll();
 
 		if (load) {
 			mc.setScreen(new SchematicLoadScreen(mc.currentScreen));
@@ -122,6 +124,8 @@ public class Schematica implements ClientModInitializer {
 			// The one thing the mod says out loud. Every other key changes something you can see;
 			// this one changes what a click does, which is invisible until a block refuses to go down.
 			mc.inGameHud.addChatMessage(EasyPlace.label());
+		} else if (materials) {
+			mc.setScreen(new MaterialListScreen(mc.currentScreen));
 		}
 	}
 }

@@ -11,7 +11,6 @@ import net.minecraft.block.Block;
 import net.minecraft.class_123;
 import net.minecraft.class_212;
 import net.minecraft.class_27;
-import net.minecraft.class_533;
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
@@ -65,24 +64,6 @@ public final class EasyPlace {
 	 * of sight rather than taken from a hit result has nothing else keeping it honest.
 	 */
 	private static final double SERVER_REACH_SQUARED = 64.0;
-
-	/**
-	 * Blocks whose item is not the block itself. Everything else is put down by a block item, which
-	 * is always registered under the id of the block it places - see {@link #itemFor}.
-	 */
-	private static final int[][] BLOCK_ITEMS = {
-			{ 26, 355 },  // bed             <- bed
-			{ 55, 331 },  // redstone wire   <- redstone
-			{ 59, 295 },  // wheat           <- seeds
-			{ 63, 323 },  // sign post       <- sign
-			{ 64, 324 },  // wooden door     <- wooden door
-			{ 68, 323 },  // wall sign       <- sign
-			{ 71, 330 },  // iron door       <- iron door
-			{ 83, 338 },  // sugar cane      <- reeds
-			{ 92, 354 },  // cake            <- cake
-			{ 93, 356 },  // repeater, off   <- redstone repeater
-			{ 94, 356 },  // repeater, on    <- redstone repeater
-	};
 
 	/** Vanilla's tick rate, which is also the fastest a placement can be repeated. */
 	private static final float TICK_RATE = 20.0F;
@@ -462,66 +443,28 @@ public final class EasyPlace {
 	 */
 	private static boolean selectItem(Minecraft mc, int blockId, int metadata) {
 		PlayerInventory inventory = mc.player.inventory;
-		int itemId = itemFor(blockId);
-		Item item = itemAt(itemId);
+		int itemId = BlockItems.itemFor(blockId);
+		Item item = BlockItems.itemAt(itemId);
 		if (item == null) {
 			return false;
 		}
 
-		boolean matchDamage = damageCanGive(item, metadata);
+		boolean matchDamage = BlockItems.damageFor(item, metadata) >= 0;
 		for (int slot = 0; slot < HOTBAR_SIZE; slot++) {
-			if (matches(inventory.main[slot], item, itemId, metadata, matchDamage)) {
+			if (BlockItems.matches(inventory.main[slot], itemId, metadata, matchDamage)) {
 				inventory.selectedSlot = slot;
 				return true;
 			}
 		}
 
 		for (int slot = HOTBAR_SIZE; slot < inventory.main.length; slot++) {
-			if (matches(inventory.main[slot], item, itemId, metadata, matchDamage)) {
+			if (BlockItems.matches(inventory.main[slot], itemId, metadata, matchDamage)) {
 				HotbarRestock.moveToHotbar(mc, slot);
 				return false;
 			}
 		}
 
 		return false;
-	}
-
-	private static boolean matches(ItemStack stack, Item item, int itemId, int metadata, boolean matchDamage) {
-		if (stack == null || stack.itemId != itemId) {
-			return false;
-		}
-		return !matchDamage || item.method_470(stack.getDamage()) == metadata;
-	}
-
-	/**
-	 * Whether the metadata the schematic wants is one this item can put down by which stack is held
-	 * - wool colour, wood type, sapling type. Where it is, the wrong stack really is the wrong
-	 * block and only an exact match will do.
-	 *
-	 * <p>Where it is not, the metadata is coming from somewhere else entirely: which way a piston
-	 * faces, the bit leaves get for being placed by hand. Insisting on a match there would refuse to
-	 * place those blocks at all, so the damage is ignored and any stack of the item will do.
-	 */
-	private static boolean damageCanGive(Item item, int metadata) {
-		for (int damage = 0; damage < 16; damage++) {
-			if (item.method_470(damage) == metadata) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	/** The item that places a block, or -1 if nothing does. */
-	static int itemFor(int blockId) {
-		for (int[] pair : BLOCK_ITEMS) {
-			if (pair[0] == blockId) {
-				return pair[1];
-			}
-		}
-
-		// A block item is registered under the id of its own block, so for everything else the block
-		// id is the item id - as long as there really is a block item there.
-		return itemAt(blockId) instanceof class_533 ? blockId : -1;
 	}
 
 	/**
@@ -531,21 +474,7 @@ public final class EasyPlace {
 	 * something else entirely and is left alone.
 	 */
 	private static boolean isPlacement(ItemStack stack) {
-		return stack == null || isBlockItem(stack);
-	}
-
-	/** Whether this stack is something that puts a block down, rather than a tool or a meal. */
-	static boolean isBlockItem(ItemStack stack) {
-		if (itemAt(stack.itemId) instanceof class_533) {
-			return true;
-		}
-
-		for (int[] pair : BLOCK_ITEMS) {
-			if (pair[1] == stack.itemId) {
-				return true;
-			}
-		}
-		return false;
+		return stack == null || BlockItems.isBlockItem(stack);
 	}
 
 	/** Whether the block does something of its own with a right click, and so keeps it. */
@@ -593,10 +522,6 @@ public final class EasyPlace {
 			Log.warn("Could not find the right-click handler on Block - easy place will not hold clicks back");
 		}
 		return found;
-	}
-
-	private static Item itemAt(int itemId) {
-		return itemId > 0 && itemId < Item.ITEMS.length ? Item.ITEMS[itemId] : null;
 	}
 
 	private static Block blockAt(World world, int x, int y, int z) {

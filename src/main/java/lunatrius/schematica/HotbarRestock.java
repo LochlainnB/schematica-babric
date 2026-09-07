@@ -196,7 +196,7 @@ public final class HotbarRestock {
 
 		for (int slot = 0; slot < HOTBAR_SIZE; slot++) {
 			ItemStack stack = inventory.main[slot];
-			if (stack == null || slot == inventory.selectedSlot || !EasyPlace.isBlockItem(stack)) {
+			if (stack == null || slot == inventory.selectedSlot || !BlockItems.isBlockItem(stack)) {
 				continue;
 			}
 
@@ -226,7 +226,7 @@ public final class HotbarRestock {
 		for (int x = 0; x < schematic.getWidth(); x++) {
 			for (int y = 0; y < schematic.getHeight(); y++) {
 				for (int z = 0; z < schematic.getLength(); z++) {
-					int item = EasyPlace.itemFor(schematic.getBlockId(x, y, z));
+					int item = BlockItems.itemFor(schematic.getBlockId(x, y, z));
 					if (item > 0) {
 						items.add(item);
 					}
