@@ -22,8 +22,10 @@ import org.lwjgl.opengl.GL12;
  * <p>The same list the material list screen shows, kept to the part of it that is still a job: a
  * row leaves the HUD the moment the player is carrying enough of it, and comes back if the stack
  * does. That is the whole point of it - the corner of the screen is worth a shopping list, not a
- * receipt - and it is why the HUD sorts on what is missing while the screen sorts on what the
- * schematic takes.
+ * receipt.
+ *
+ * <p>The order is the screen's own, on what the schematic takes, with the option of turning it
+ * round. A row being gathered holds its place until it is finished and goes.
  *
  * <p>It draws from the end of the vanilla HUD rather than from a hook of its own, which is what
  * gets it the gui scale, the F1 toggle and the right place in the draw order for nothing.

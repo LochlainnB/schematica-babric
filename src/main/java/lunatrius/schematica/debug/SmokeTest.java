@@ -523,15 +523,24 @@ public final class SmokeTest {
 		check("and comes back when the stack leaves the pack", back.size(), 3);
 		check("asking for what is still short, not the whole row", hudRow(back, WOOL).getMissing(), 1);
 
-		// Two rows level with each other: they have to come out the same way round whichever end
-		// the hud is sorting from, or a pile finished off would shuffle its neighbour about.
-		carried[0] = new ItemStack(GOLD, 2, 0);
+		// The order is the schematic's, not the pack's: a row being worked on holds its place, and
+		// only leaves by being finished. Carrying eleven of the thirty redstone a build wants must
+		// not drop it under twenty cobblestone nobody has touched.
+		List<MaterialList.Entry> settled = list.getOutstanding(MaterialList.Sort.DESCENDING);
+		carried[0] = new ItemStack(GOLD, 3, 0);
 		list.countInventory(carried);
-		List<MaterialList.Entry> levelDown = list.getOutstanding(MaterialList.Sort.DESCENDING);
-		List<MaterialList.Entry> levelUp = list.getOutstanding(MaterialList.Sort.ASCENDING);
-		check("gold and wool are level now", levelDown.get(0).getMissing(), levelDown.get(1).getMissing());
-		checkTrue("and level rows keep their order in both sorts",
-				levelDown.get(0) == levelUp.get(1) && levelDown.get(1) == levelUp.get(2));
+		List<MaterialList.Entry> started = list.getOutstanding(MaterialList.Sort.DESCENDING);
+		check("gathering some of a row leaves every row where it was", started.size(), settled.size());
+		checkTrue("in the same order it was in before",
+				started.get(0) == settled.get(0) && started.get(1) == settled.get(1)
+						&& started.get(2) == settled.get(2));
+		check("even though the row at the top now has the least left to gather",
+				started.get(0).getMissing(), 1);
+		check("and the row under it has more", started.get(1).getMissing(), 2);
+		checkTrue("because the order is what the schematic takes",
+				started.get(0).getNeeded() > started.get(1).getNeeded());
+		checkTrue("and the other way up is still the reverse of it",
+				list.getOutstanding(MaterialList.Sort.ASCENDING).get(0) == started.get(2));
 
 		ItemStack[] everything = {
 				new ItemStack(GOLD, 4, 0), new ItemStack(WOOL, 2, 0), new ItemStack(REDSTONE_DUST, 1, 0) };
@@ -651,8 +660,8 @@ public final class SmokeTest {
 		checkTrue("with something in it", !InfoHud.getRows().isEmpty());
 
 		List<MaterialList.Entry> most = InfoHud.getRows();
-		checkTrue("the most to gather leading",
-				most.get(0).getMissing() >= most.get(most.size() - 1).getMissing());
+		checkTrue("the most the schematic takes leading",
+				most.get(0).getNeeded() >= most.get(most.size() - 1).getNeeded());
 
 		clickButton(screen, buttonAt(screen, 1));
 		checkTrue("the sort button turns the list round",
@@ -660,7 +669,7 @@ public final class SmokeTest {
 		InfoHud.tick(mc);
 		List<MaterialList.Entry> fewest = InfoHud.getRows();
 		checkTrue("and the hud draws it that way up",
-				fewest.get(0).getMissing() <= fewest.get(fewest.size() - 1).getMissing());
+				fewest.get(0).getNeeded() <= fewest.get(fewest.size() - 1).getNeeded());
 
 		clickButton(screen, buttonAt(screen, 0));
 		checkTrue("the button turns the hud off again", !config.infoHud);

@@ -257,9 +257,9 @@ public final class MaterialList {
 
 	/** Which end of the list the info HUD puts first. */
 	public enum Sort {
-		/** Most left to gather at the top, so the long jobs lead. */
+		/** Most to gather at the top, so the long jobs lead. */
 		DESCENDING,
-		/** Fewest left to gather at the top, so the rows about to finish lead. */
+		/** Fewest to gather at the top, so the short jobs lead. */
 		ASCENDING
 	}
 
@@ -270,9 +270,12 @@ public final class MaterialList {
 	 * find, and a row that is done is not that. Nothing is remembered between calls, so the row
 	 * comes straight back if the stack leaves the pack again.
 	 *
-	 * <p>Sorting on what is missing does shuffle the rows about while the player gathers, which is
-	 * the opposite of what the screen does - but it is what keeps the next thing to fetch at a
-	 * known end of a HUD only a few rows tall, and it is the sort that was asked for.
+	 * <p>Ordered by what the schematic takes and not by what is left of it, which is the same order
+	 * the screen uses and for the same reason: a row has to hold its place while it is being worked
+	 * on. Sorting on what is missing would push a row down the moment a stack of it went in the
+	 * pack - eleven of the thirty redstone a build wants would drop it below twenty cobblestone
+	 * nobody had started on - and a row is meant to leave this list by being finished, not by being
+	 * begun.
 	 */
 	public List<Entry> getOutstanding(Sort order) {
 		List<Entry> outstanding = new ArrayList<>();
@@ -284,8 +287,8 @@ public final class MaterialList {
 
 		outstanding.sort((left, right) -> {
 			int difference = order == Sort.ASCENDING
-					? left.getMissing() - right.getMissing()
-					: right.getMissing() - left.getMissing();
+					? left.needed - right.needed
+					: right.needed - left.needed;
 			return difference != 0 ? difference : left.getName().compareToIgnoreCase(right.getName());
 		});
 		return outstanding;

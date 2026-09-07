@@ -88,10 +88,10 @@ when there is nothing left it says so rather than disappearing, which is the dif
 finished and switched off. Rows are counted again every tick, whether or not a screen is open, so
 you can watch a row go while sorting a chest.
 
-**HUD Sort** puts either the most or the fewest left to gather at the top. Unlike the screen, the
-HUD does sort on what is missing - it is a few rows in a corner rather than a whole list, so the row
-that matters has to be at a known end of it. Rows that are level with each other are ordered by name
-whichever way round the sort is, so finishing one pile does not shuffle its neighbours.
+**HUD Sort** puts either the most or the fewest the schematic takes at the top. That is what it
+takes, not what is left of it, so a row holds its place while you work on it: collect eleven of the
+thirty redstone a build wants and it stays above the twenty cobblestone you have not touched instead
+of dropping under it. A row only ever leaves this list by being finished.
 
 The HUD shows as many rows as fit in half the screen, up to ten, with a count of what did not fit
 underneath. It sits in the very corner when it is narrow enough to stay clear of the hotbar and
@@ -386,10 +386,11 @@ loaded rather than the one the test built.
 The info HUD is the same list read a different way, so it is checked the same way: a list is sorted
 from both ends and the order asserted outright, a row is gathered and checked to have left the HUD,
 the stack is taken back out of the pack and the row checked to have come back asking only for what
-is still short, and two rows level with each other are checked to come out the same way round from
-either sort. The buttons under the material list are then clicked for real and the HUD asked what it
-would draw, which is what joins the two halves. Scene 8 is a screenshot of it over the world and
-scene 9 one of it behind an open screen, since whether it draws is not something the checks can say.
+is still short, and part of a row is gathered and every row checked to be exactly where it was, with
+the row now needing the least still at the top. The buttons under the material list are then clicked
+for real and the HUD asked what it would draw, which is what joins the two halves. Scene 8 is a
+screenshot of it over the world and scene 9 one of it behind an open screen, since whether it draws
+is not something the checks can say.
 
 `./gradlew runClient -Psmoketest=multiplayer` joins a b1.7.3 server on `localhost:25565` instead of
 making a world, and checks easy place against it. This is the only way to exercise the half of the
