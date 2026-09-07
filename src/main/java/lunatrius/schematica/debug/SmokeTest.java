@@ -63,6 +63,8 @@ public final class SmokeTest {
 	private static final int SERVER_PORT = 25565;
 
 	private static final int STRUCTURE_SIZE = 5;
+	/** The highest the test structure is built, leaving room for the ghost and the camera above it. */
+	private static final int MAX_BUILD_Y = 100;
 
 	/** Big enough to span several render regions in every axis, with the camera inside it. */
 	private static final int LARGE_WIDTH = 48;
@@ -79,6 +81,9 @@ public final class SmokeTest {
 	private static final int PISTON = 33;
 	private static final int COBBLESTONE = 4;
 	private static final int SNOW_LAYER = 78;
+	private static final int SAND = 12;
+	private static final int REDSTONE_WIRE = 55;
+	private static final int REDSTONE_DUST = 331;
 
 	/** Nine blocks to fill the bar plus the gold, which is what the server is asked to hand out. */
 	private static final int TEST_STACKS = 10;
@@ -90,6 +95,10 @@ public final class SmokeTest {
 
 	private static final int HOTBAR_SIZE = 9;
 	private static final int GOLD_SLOT = 3;
+	/** Hotbar slots the mid-air checks lay out for themselves. */
+	private static final int MIDAIR_GOLD_SLOT = 0;
+	private static final int MIDAIR_REDSTONE_SLOT = 1;
+	private static final int MIDAIR_SAND_SLOT = 2;
 	private static final int PICKAXE_SLOT = 5;
 	/** Faces of the block a click lands on, in vanilla's order. */
 	private static final int SIDE_UP = 1;
@@ -484,6 +493,9 @@ public final class SmokeTest {
 	private static double joinX;
 	private static double joinY;
 	private static double joinZ;
+	private static int airX;
+	private static int airY;
+	private static int airZ;
 
 	/**
 	 * Easy place against a real server, which is the only place half of it exists: in single player
@@ -606,17 +618,104 @@ public final class SmokeTest {
 				nextStep(7);
 				return;
 
-			default:
+			case 7:
 				// A block the server did not accept would have been taken back off us by now.
 				if (ticks < 40) {
 					return;
 				}
 				check("the server kept the block that was placed",
 						mc.world.getBlockId(targetX, targetY, targetZ), GOLD);
+
+				// On to the half of it that has nothing to build against. A server is entitled to
+				// refuse a click on a position that holds nothing at all, so whether it goes through
+				// is a question only a real one can answer.
+				if (!setUpAirTarget(mc)) {
+					finish(mc);
+					return;
+				}
+				nextStep(8);
+				return;
+
+			case 8:
+				// Straight up, which is the one aim that needs nothing worked out to know where it
+				// lands, and nothing faked: the mod finds the position from the look itself.
+				mc.player.pitch = -90.0F;
+				mc.field_2823 = null;
+				rightClick(mc);
+				check("a block with nothing to build against goes down on a server",
+						mc.world.getBlockId(airX, airY, airZ), GOLD);
+				nextStep(9);
+				return;
+
+			default:
+				// The same wait again: a placement the server threw out comes back as a block update
+				// putting the air back, so a block still standing here is one the server agreed to.
+				if (ticks < 40) {
+					return;
+				}
+				check("and the server kept that one too",
+						mc.world.getBlockId(airX, airY, airZ), GOLD);
 				check("no swap was turned down anywhere along the way", HotbarRestock.getRefusals(), 0);
 				Log.info("SMOKETEST: --- easy place on a server done ---");
 				finish(mc);
 		}
+	}
+
+	/**
+	 * Finds a block of air above the player with nothing touching it, which is the position the
+	 * schematic is then moved to. Straight up, because that is the one direction a player standing
+	 * outdoors can be relied on to have clear.
+	 */
+	private static boolean setUpAirTarget(Minecraft mc) {
+		int px = (int) Math.floor(mc.player.x);
+		int py = (int) Math.floor(mc.player.y);
+		int pz = (int) Math.floor(mc.player.z);
+
+		// One above the eye is still the player's own space; from two up the line of sight is clear.
+		for (int up = 2; up <= 5; up++) {
+			int y = py + up;
+			if (y > 126 || !isSurroundedByAir(mc, px, y, pz) || !isClearBetween(mc, px, py, pz, y)) {
+				continue;
+			}
+
+			airX = px;
+			airY = y;
+			airZ = pz;
+			Schematica.STATE.offset.set(airX, airY, airZ);
+			Schematica.STATE.needsUpdate = true;
+			Log.info("SMOKETEST: one gold block wanted in mid air at " + airX + ", " + airY + ", " + airZ);
+			checkTrue("there is nothing at all around the position in the air",
+					isSurroundedByAir(mc, airX, airY, airZ));
+			return true;
+		}
+
+		StringBuilder above = new StringBuilder();
+		for (int up = 1; up <= 6; up++) {
+			above.append(above.length() == 0 ? "" : ", ").append('y').append(py + up).append('=')
+					.append(mc.world.getBlockId(px, py + up, pz));
+		}
+		fail("found no clear air above the player at " + px + ", " + py + ", " + pz + " - " + above, null);
+		return false;
+	}
+
+	/** Whether the line of sight from the eye up to a position has nothing standing in it. */
+	private static boolean isClearBetween(Minecraft mc, int x, int py, int z, int y) {
+		for (int between = py + 1; between < y; between++) {
+			if (mc.world.getBlockId(x, between, z) != 0) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static boolean isSurroundedByAir(Minecraft mc, int x, int y, int z) {
+		return mc.world.getBlockId(x, y, z) == 0
+				&& mc.world.getBlockId(x, y - 1, z) == 0
+				&& mc.world.getBlockId(x, y + 1, z) == 0
+				&& mc.world.getBlockId(x - 1, y, z) == 0
+				&& mc.world.getBlockId(x + 1, y, z) == 0
+				&& mc.world.getBlockId(x, y, z - 1) == 0
+				&& mc.world.getBlockId(x, y, z + 1) == 0;
 	}
 
 	private static void nextStep(int next) {
@@ -633,37 +732,15 @@ public final class SmokeTest {
 		int py = (int) Math.floor(mc.player.y);
 		int pz = (int) Math.floor(mc.player.z);
 
-		// Clear ground first. Failing that a snow layer, which is the one block a placement replaces
-		// where it stands rather than landing on top of - and in a snowy biome it covers everything.
-		for (int pass = 0; pass < 2; pass++) {
-			for (int dx = -4; dx <= 4; dx++) {
-				for (int dz = -4; dz <= 4; dz++) {
-					if (Math.abs(dx) < 2 && Math.abs(dz) < 2) {
-						continue; // where the player is standing
+		// Nearest columns first, so the block goes down where the player can see it, and never in the
+		// two columns they are standing in - a placement there would be refused for being inside them.
+		for (int radius = 2; radius <= 5; radius++) {
+			for (int dx = -radius; dx <= radius; dx++) {
+				for (int dz = -radius; dz <= radius; dz++) {
+					if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) {
+						continue;
 					}
-
-					for (int dy = -3; dy <= 2; dy++) {
-						int x = px + dx;
-						int y = py + dy;
-						int z = pz + dz;
-						if (mc.world.getBlockId(x, y + 1, z) != 0) {
-							continue;
-						}
-
-						boolean ground = pass == 0
-								&& mc.world.method_1783(x, y, z)
-								&& mc.world.getBlockId(x, y + 2, z) == 0;
-						boolean snow = pass == 1 && mc.world.getBlockId(x, y, z) == SNOW_LAYER;
-						if (!ground && !snow) {
-							continue;
-						}
-
-						hitX = x;
-						hitY = y;
-						hitZ = z;
-						targetX = x;
-						targetY = snow ? y : y + 1;
-						targetZ = z;
+					if (findGround(mc, px + dx, py, pz + dz)) {
 						return loadSingleBlockSchematic(mc);
 					}
 				}
@@ -671,12 +748,48 @@ public final class SmokeTest {
 		}
 
 		StringBuilder around = new StringBuilder();
-		for (int dy = -3; dy <= 2; dy++) {
-			around.append(around.length() == 0 ? "" : ", ").append("y").append(py + dy).append('=')
-					.append(mc.world.getBlockId(px + 2, py + dy, pz));
+		for (int dy = 2; dy >= -12; dy--) {
+			around.append(around.length() == 0 ? "" : ", ").append('y').append(py + dy).append('=')
+					.append(mc.world.getBlockId(px, py + dy, pz));
 		}
-		fail("found nowhere beside the player to build - standing at " + px + ", " + py + ", " + pz
-				+ " with " + around, null);
+		fail("found nowhere near the player to build - standing at " + px + ", " + py + ", " + pz
+				+ " over " + around, null);
+		return false;
+	}
+
+	/**
+	 * The first block in a column that something can be built on top of, searching down from head
+	 * height. Down rather than in a fixed window because where the ground is depends entirely on
+	 * where the server dropped the player - a ledge, a hillside or the floor of a hole.
+	 *
+	 * <p>A snow layer counts as well: it is the one block a placement replaces where it stands
+	 * rather than landing on top of, and in a snowy biome it covers everything.
+	 */
+	private static boolean findGround(Minecraft mc, int x, int py, int z) {
+		for (int y = py + 2; y >= py - 12 && y > 0; y--) {
+			if (mc.world.getBlockId(x, y + 1, z) != 0 || mc.world.getBlockId(x, y + 2, z) != 0) {
+				continue;
+			}
+
+			boolean snow = mc.world.getBlockId(x, y, z) == SNOW_LAYER;
+			if (!snow && !mc.world.method_1783(x, y, z)) {
+				continue;
+			}
+
+			// The server measures the reach to the block that was clicked and throws out anything
+			// past eight; well inside that, so a spot found down a hillside is still a fair test.
+			if (mc.player.method_1347(x + 0.5, y + 0.5, z + 0.5) > 36.0) {
+				continue;
+			}
+
+			hitX = x;
+			hitY = y;
+			hitZ = z;
+			targetX = x;
+			targetY = snow ? y : y + 1;
+			targetZ = z;
+			return true;
+		}
 		return false;
 	}
 
@@ -781,7 +894,10 @@ public final class SmokeTest {
 		}
 
 		baseX = (int) Math.floor(mc.player.x) + 4;
-		baseY = (int) Math.floor(mc.player.y);
+		// The camera is parked above the structure for the screenshots, and that is where the player is
+		// when the world is saved - so a reused world would build higher every run, and eventually out
+		// of the top of the world altogether. Capped so the same save can be run against for ever.
+		baseY = Math.min((int) Math.floor(mc.player.y), MAX_BUILD_Y);
 		baseZ = (int) Math.floor(mc.player.z) - 2;
 
 		Log.info("SMOKETEST: building at " + baseX + ", " + baseY + ", " + baseZ);
@@ -1188,6 +1304,7 @@ public final class SmokeTest {
 
 			runMetadataMatchTests(mc);
 			runRestockTests(mc, x, y, z);
+			runMidairTests(mc, x, y, z);
 
 			// Everything above asks the mod what it would do. The rest goes through the client's own
 			// click handler, which is what the mixin hangs off, so a block really does or does not
@@ -1642,5 +1759,177 @@ public final class SmokeTest {
 		} else {
 			Log.error("SMOKETEST: " + message);
 		}
+	}
+
+	/**
+	 * Placing where there is nothing to build against. Vanilla cannot do this at all - a click has
+	 * to land on a block - so all of it is easy place working out for itself what the player is
+	 * looking at, and every check goes through the client's own click handler rather than asking the
+	 * mod what it would do.
+	 *
+	 * <p>The player is stood three blocks west of the gap looking straight along it, with everything
+	 * between them cleared out, so the only thing on the line of sight is the gap itself. Puts the
+	 * world, the schematic and the player back the way it found them.
+	 */
+	private static void runMidairTests(Minecraft mc, int x, int y, int z) {
+		SchematicaState state = Schematica.STATE;
+		Schematic schematic = state.schematic.getSchematic();
+		World world = mc.world;
+		PlayerInventory inventory = mc.player.inventory;
+
+		// The line of sight runs east into the gap, so the blocks the player stands among and every
+		// one between them and the gap have to be out of the way - above and below it as well, since
+		// what is around a position decides whether a block can stand in it.
+		int fromX = x - 3;
+		int toX = x + 1;
+		int span = (toX - fromX + 1) * 3 * 3;
+		int[] savedBlocks = new int[span];
+		int[] savedMetadata = new int[span];
+		int index = 0;
+		for (int bx = fromX; bx <= toX; bx++) {
+			for (int by = y - 1; by <= y + 1; by++) {
+				for (int bz = z - 1; bz <= z + 1; bz++) {
+					savedBlocks[index] = world.getBlockId(bx, by, bz);
+					savedMetadata[index] = world.method_1778(bx, by, bz);
+					index++;
+				}
+			}
+		}
+
+		// Local x 0 to 3 is the same run of the schematic; nothing but the gap itself is wanted, or
+		// a block on the way in would be built before the one being aimed at.
+		int[] savedWanted = new int[4];
+		int[] savedWantedMetadata = new int[4];
+		for (int local = 0; local < savedWanted.length; local++) {
+			savedWanted[local] = schematic.getBlockId(local, 0, 2);
+			savedWantedMetadata[local] = schematic.getMetadata(local, 0, 2);
+		}
+
+		ItemStack[] savedInventory = new ItemStack[inventory.main.length];
+		System.arraycopy(inventory.main, 0, savedInventory, 0, savedInventory.length);
+		int savedSlot = inventory.selectedSlot;
+		class_27 savedHit = mc.field_2823;
+		double savedPlayerX = mc.player.x;
+		double savedPlayerY = mc.player.y;
+		double savedPlayerZ = mc.player.z;
+		float savedYaw = mc.player.yaw;
+		float savedPitch = mc.player.pitch;
+
+		try {
+			Log.info("SMOKETEST: --- easy place in mid air ---");
+
+			for (int bx = fromX; bx <= toX; bx++) {
+				for (int by = y - 1; by <= y + 1; by++) {
+					for (int bz = z - 1; bz <= z + 1; bz++) {
+						world.method_201(bx, by, bz, 0, 0);
+					}
+				}
+			}
+			for (int local = 0; local < savedWanted.length; local++) {
+				schematic.setBlockId(local, 0, 2, 0);
+				schematic.setMetadata(local, 0, 2, 0);
+			}
+			schematic.setBlockId(2, 0, 2, GOLD);
+
+			// Eye height is the middle of the gap's own layer, so the line of sight runs flat into it.
+			// Yaw -90 is due east, which is the +x the gap lies along.
+			// This takes the feet rather than the eye - it adds the player's own eye offset on the way
+			// through - and everything about aiming is measured from the eye. So it is asked for the
+			// height that is wanted, and then asked again for that height less however far it moved.
+			mc.player.method_1341(x - 2.5, y + 0.5, z + 0.5, -90.0F, 0.0F);
+			double eyeOffset = mc.player.y - (y + 0.5);
+			mc.player.method_1341(x - 2.5, y + 0.5 - eyeOffset, z + 0.5, -90.0F, 0.0F);
+			checkTrue("the aim is level with the middle of the gap", Math.abs(mc.player.y - (y + 0.5)) < 0.001);
+			mc.field_2823 = null;
+			// The one thing here that cannot be read back from a check: what the mod is actually
+			// looking along. A wrong eye or a wrong camera would fail every mid-air check at once
+			// and look exactly like the feature not working.
+			Vec3d aimFrom = mc.player.method_931(1.0F);
+			Vec3d aimAlong = mc.player.method_926(1.0F);
+			Log.info("SMOKETEST: aiming from " + aimFrom.x + ", " + aimFrom.y + ", " + aimFrom.z
+					+ " along " + aimAlong.x + ", " + aimAlong.y + ", " + aimAlong.z
+					+ " reaching " + mc.interactionManager.method_1715()
+					+ ", camera " + (mc.field_2807 == mc.player ? "is the player" : "is " + mc.field_2807)
+					+ ", gap at " + x + ", " + y + ", " + z);
+
+			clearInventory(inventory);
+			inventory.main[MIDAIR_GOLD_SLOT] = new ItemStack(GOLD, 64, 0);
+			inventory.main[MIDAIR_REDSTONE_SLOT] = new ItemStack(REDSTONE_DUST, 64, 0);
+			inventory.main[MIDAIR_SAND_SLOT] = new ItemStack(SAND, 64, 0);
+			// Empty handed, and nothing being aimed at: everything below is easy place alone.
+			inventory.selectedSlot = HOTBAR_SIZE - 1;
+			HotbarRestock.reset();
+
+			checkTrue("nothing is holding the gap up", world.getBlockId(x, y - 1, z) == 0);
+			checkTrue("and there is nothing beside it to build against",
+					world.getBlockId(x - 1, y, z) == 0 && world.getBlockId(x + 1, y, z) == 0
+							&& world.getBlockId(x, y, z - 1) == 0 && world.getBlockId(x, y, z + 1) == 0
+							&& world.getBlockId(x, y + 1, z) == 0);
+			checkTrue("so vanilla has nothing to aim at", mc.field_2823 == null);
+
+			rightClick(mc);
+			check("a block with nothing to build against is placed in mid air", world.getBlockId(x, y, z), GOLD);
+			check("out of the slot the schematic asked for", inventory.selectedSlot, MIDAIR_GOLD_SLOT);
+			world.method_201(x, y, z, 0, 0);
+
+			// The same click along the same line, with the schematic no longer asking for anything.
+			schematic.setBlockId(2, 0, 2, 0);
+			rightClick(mc);
+			check("and nothing at all where the schematic wants nothing", world.getBlockId(x, y, z), 0);
+
+			// Redstone would drop off the moment it was put down, so the position waits for its floor.
+			// The dust is on the bar throughout: what refuses the placement is the block, not the want
+			// of something to place it with.
+			schematic.setBlockId(2, 0, 2, REDSTONE_WIRE);
+			rightClick(mc);
+			check("a block that needs something under it is left for its floor", world.getBlockId(x, y, z), 0);
+
+			// Sand would place quite happily and then fall straight back out of the air.
+			schematic.setBlockId(2, 0, 2, SAND);
+			rightClick(mc);
+			check("a block that would fall is not left hanging", world.getBlockId(x, y, z), 0);
+
+			world.method_201(x, y - 1, z, COBBLESTONE, 0);
+			rightClick(mc);
+			check("but goes down once something is holding it", world.getBlockId(x, y, z), SAND);
+			world.method_201(x, y, z, 0, 0);
+			world.method_201(x, y - 1, z, 0, 0);
+
+			// A block in the way ends the line of sight, exactly as it does for vanilla's own ray.
+			schematic.setBlockId(2, 0, 2, GOLD);
+			world.method_201(x - 1, y, z, COBBLESTONE, 0);
+			rightClick(mc);
+			check("nothing is built through a block in the way", world.getBlockId(x, y, z), 0);
+
+			// And with a face to aim at, the click vanilla can make itself is left to it: the same
+			// block ends up in the same place, but by the ordinary path rather than this one.
+			mc.field_2823 = hitResult(x - 1, y, z, SIDE_EAST);
+			checkTrue("a position an ordinary click can reach is left to it", !EasyPlace.interceptUse(mc));
+			check("with the block it wants already in hand", inventory.selectedSlot, MIDAIR_GOLD_SLOT);
+			rightClick(mc);
+			check("and that click builds it", world.getBlockId(x, y, z), GOLD);
+		} finally {
+			index = 0;
+			for (int bx = fromX; bx <= toX; bx++) {
+				for (int by = y - 1; by <= y + 1; by++) {
+					for (int bz = z - 1; bz <= z + 1; bz++) {
+						world.method_201(bx, by, bz, savedBlocks[index], savedMetadata[index]);
+						index++;
+					}
+				}
+			}
+			for (int local = 0; local < savedWanted.length; local++) {
+				schematic.setBlockId(local, 0, 2, savedWanted[local]);
+				schematic.setMetadata(local, 0, 2, savedWantedMetadata[local]);
+			}
+			System.arraycopy(savedInventory, 0, inventory.main, 0, savedInventory.length);
+			inventory.selectedSlot = savedSlot;
+			mc.field_2823 = savedHit;
+			mc.player.method_1341(savedPlayerX, savedPlayerY, savedPlayerZ, savedYaw, savedPitch);
+			HotbarRestock.reset();
+			state.needsUpdate = true;
+		}
+
+		Log.info("SMOKETEST: --- easy place in mid air done ---");
 	}
 }

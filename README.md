@@ -82,6 +82,25 @@ What it deliberately leaves alone:
 Everything is decided before the click reaches the interaction manager, so a click that is dropped
 never becomes a placement packet - the mode behaves the same on a server as in single player.
 
+#### Building into thin air
+
+A block the schematic wants with nothing beside it can be placed anyway. Vanilla has no way to do
+this - a click has to land on a block, so a position surrounded by air has no face to aim at - so
+easy place follows your line of sight itself and puts down the first block the schematic wants
+along it, whether or not anything is holding that block up. Cobblestone hangs in the air quite
+happily; a wall goes up course by course without a scaffold under it.
+
+Which blocks can stand on their own is not a list kept by the mod: it is the game's own answer to
+whether the block may go there. So redstone, a torch or a sapling is left alone until the block it
+needs has been built, because those would drop off the moment they were placed. Sand and gravel are
+held back too - they pass the game's check and then fall straight back out of the air - but only
+where nothing is holding them, so a schematic that stacks sand on a floor still builds.
+
+The nearest position on the line wins, so what goes down is always the first thing you are looking
+at, and a block in the way ends the line exactly as it does for vanilla's own aim - nothing is ever
+built through a wall. A position you could have clicked at normally is still left to the ordinary
+path, so this only ever adds placements that were impossible before, and it takes none away.
+
 #### Taking blocks off the hotbar
 
 Blocks are fetched from the rest of your inventory, not just the bar. When what the schematic wants
@@ -215,6 +234,7 @@ SchematicaState    everything about the current session
 SchematicaConfig   the render settings, and the keybinds it hands to vanilla
 EasyPlace          what a right click is allowed to do while easy place is on
 HotbarRestock      brings a block onto the hotbar, and waits for the server to agree
+Sightline          walks the blocks along the line of sight, nearest first
 ```
 
 `Schematic` is deliberately free of world and rendering state, so a future material list, printer or
@@ -243,7 +263,9 @@ Behaviour is otherwise the same as 1.2.0.10; these are deliberate changes:
 - **The layer slice has keys of its own.** The original could only change it from the move screen,
   which meant opening a screen between every course.
 - **Easy place.** The original had nothing like it: every block was placed by hand, against a ghost
-  that was only ever a picture. See above for what it does and does not take over.
+  that was only ever a picture. It also places where vanilla cannot - a block the schematic wants
+  with nothing around it goes down in mid air - which is a placement the original could not make at
+  all rather than one it made differently. See above for what it does and does not take over.
 - **Rotate and mirror move block entities.** The original left signs and chests at their old
   coordinates after a transform.
 - **A fresh dimension backs `SchematicWorld`.** The original passed the live world's dimension to
@@ -281,6 +303,14 @@ checked separately, so a rule that stopped working would be named rather than ju
 Bringing a block onto the hotbar is checked the same way, including which slot is given up for it:
 never a tool, never what is in hand, and a block this schematic uses nowhere before one it needs.
 
+Placing in mid air is checked end to end rather than by asking: the player is stood three blocks west
+of a gap with everything between them cleared out, and each click goes through the client's own
+handler, so a block either turns up in the world or it does not. One goes down with nothing at all
+around it, and nothing goes down where the schematic wants nothing, where the block needs something
+under it, where it would fall, or where something is in the way. A position an ordinary click could
+reach is checked to be left to the ordinary path, which is what keeps this from quietly taking over
+the common case.
+
 `./gradlew runClient -Psmoketest=multiplayer` joins a b1.7.3 server on `localhost:25565` instead of
 making a world, and checks easy place against it. This is the only way to exercise the half of the
 inventory swap that exists on a server and nowhere else - the asking, and the being answered - since
@@ -290,6 +320,12 @@ placed is still there a couple of seconds later rather than taken back off the p
 server turns down fails the run. `scratchpad/mptest.sh` in the session's temp directory starts the
 server, joins with the dev client and hands out the items; the server jar is the vanilla one from
 the loom cache and runs on a modern JDK.
+
+The mid-air placement is checked there too, and for the same reason: whether a server accepts a click
+on a position that holds nothing at all is not something reading the client can settle. The player
+looks straight up at a block of air with nothing touching it, clicks, and the block has to be both
+there straight away and still there two seconds later - a placement the server threw out comes back
+as a block update putting the air back, so surviving that wait is the server's agreement.
 
 The layer step - which the layer keys and the move screen's buttons share - is checked at both ends
 of the range, including that a step past the end rebuilds nothing. The mod's controls screen is
