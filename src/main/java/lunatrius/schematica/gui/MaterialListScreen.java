@@ -124,15 +124,9 @@ public class MaterialListScreen extends Screen {
 			return "";
 		}
 
-		String totals = Translations.get("schematic.materials.needed") + ": " + count(this.materials.getTotalNeeded())
+		return Translations.get("schematic.materials.needed") + ": " + count(this.materials.getTotalNeeded())
 				+ "    " + Translations.get("schematic.materials.missing") + ": "
 				+ count(this.materials.getTotalMissing());
-
-		int unplaceable = this.materials.getUnplaceable();
-		if (unplaceable > 0) {
-			totals += "    (" + count(unplaceable) + " " + Translations.get("schematic.materials.unplaceable") + ")";
-		}
-		return totals;
 	}
 
 	private static String count(int value) {

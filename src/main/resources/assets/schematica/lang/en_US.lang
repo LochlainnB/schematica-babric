@@ -45,7 +45,6 @@ schematic.materials.missing=Missing
 schematic.materials.needed=Needed
 schematic.materials.none=No schematic loaded
 schematic.materials.empty=This schematic is empty
-schematic.materials.unplaceable=blocks nothing can place
 key.schematica.load=Load Schematic
 key.schematica.save=Save Selection
 key.schematica.control=Move Schematic

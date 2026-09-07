@@ -65,22 +65,34 @@ public final class BlockItems {
 	}
 
 	/**
-	 * The damage a stack has to carry to put down a block with this metadata, or -1 when none of
-	 * them does.
+	 * The damage a stack has to carry to put down a block with this metadata, or -1 when the
+	 * metadata is not something a stack carries at all.
 	 *
 	 * <p>Where there is an answer, the metadata is the thing that tells one stack of the item from
 	 * another - wool colour, wood type, sapling type - and only that stack will do. Where there is
-	 * not, the metadata is coming from somewhere else entirely: which way a piston faces, the bit
-	 * leaves get for being placed by hand. Insisting on a match there would refuse to place those
-	 * blocks at all, so any stack of the item is taken instead.
+	 * not, the metadata is coming from somewhere else entirely: which way a piston faces, which way
+	 * a stair turns, the bit leaves get for being placed by hand. Insisting on a match there would
+	 * refuse to place those blocks at all, so any stack of the item is taken instead.
+	 *
+	 * <p>An item whose damage always places the same metadata cannot tell one of its stacks from
+	 * another whatever the metadata is, so it is never an answer - not even for the metadata it
+	 * does place. Stairs facing north would otherwise be a different material from stairs facing
+	 * south, which they are not.
 	 */
 	public static int damageFor(Item item, int metadata) {
+		int first = item.method_470(0);
+		boolean carried = false;
+		int found = -1;
+
 		for (int damage = 0; damage < VALUES; damage++) {
-			if (item.method_470(damage) == metadata) {
-				return damage;
+			int placed = item.method_470(damage);
+			carried |= placed != first;
+			if (found < 0 && placed == metadata) {
+				found = damage;
 			}
 		}
-		return -1;
+
+		return carried ? found : -1;
 	}
 
 	/**
@@ -95,6 +107,70 @@ public final class BlockItems {
 
 		Item item = itemAt(itemId);
 		return !matchDamage || (item != null && item.method_470(stack.getDamage()) == metadata);
+	}
+
+
+	/**
+	 * Blocks that are not their own material. Each row is the block, the item you would go and
+	 * fetch for it and how many of that item one block takes, with -1 for a block that is no
+	 * material at all: one that comes with another block, or that is lit rather than placed.
+	 *
+	 * <p>Separate from {@link #BLOCK_ITEMS} because it answers a different question. That table is
+	 * what easy place puts in your hand, and it can only hold things easy place can build with -
+	 * it does not click with buckets, and nothing at all puts a piston head down. This one is what
+	 * you have to be carrying, which for water is a bucket whether or not anything will ever pour
+	 * it for you.
+	 */
+	private static final int[][] MATERIALS = {
+			{  8, 326, 1 },  // water              <- water bucket
+			{  9, 326, 1 },
+			{ 10, 327, 1 },  // lava               <- lava bucket
+			{ 11, 327, 1 },
+			{ 34,  -1, 0 },  // piston head        - comes out of the piston
+			{ 36,  -1, 0 },  // piston moving      - the block a piston is pushing, mid push
+			{ 43,  44, 2 },  // double slab        <- two slabs, one on top of the other
+			{ 51,  -1, 0 },  // fire               - lit, not placed
+			{ 60,   3, 1 },  // farmland           <- dirt, then a hoe
+			{ 62,  61, 1 },  // furnace, lit       <- furnace
+			{ 74,  73, 1 },  // redstone ore, lit  <- redstone ore
+			{ 75,  76, 1 },  // redstone torch off <- redstone torch
+			{ 90,  -1, 0 },  // portal             - lit, not placed
+	};
+
+	/** Water and lava, whose metadata says whether the block is a source or what flowed out of it. */
+	private static final int FLOWING_WATER = 8;
+	private static final int STILL_LAVA = 11;
+
+	/**
+	 * The item you would go and fetch to build a block, or -1 when the block is no material of its
+	 * own - a piston head, water that flowed out of a source, the top half of a door.
+	 *
+	 * <p>This is the material list's question rather than easy place's: it asks what has to be in
+	 * the pack, not what a click can be made with.
+	 */
+	public static int materialFor(int blockId, int metadata) {
+		// A pool is one bucket per source block. Everything else in it is water that ran there on
+		// its own and would run there again, so it is nothing to carry.
+		if (blockId >= FLOWING_WATER && blockId <= STILL_LAVA && metadata != 0) {
+			return -1;
+		}
+
+		for (int[] row : MATERIALS) {
+			if (row[0] == blockId) {
+				return row[1];
+			}
+		}
+		return itemFor(blockId);
+	}
+
+	/** How many of that item one block takes - one, unless a block is built out of a pair. */
+	public static int materialCount(int blockId) {
+		for (int[] row : MATERIALS) {
+			if (row[0] == blockId) {
+				return row[2];
+			}
+		}
+		return 1;
 	}
 
 	public static Item itemAt(int itemId) {

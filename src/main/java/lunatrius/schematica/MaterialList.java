@@ -15,9 +15,10 @@ import net.minecraft.item.ItemStack;
  * What a schematic is built out of: one row for each kind of item it takes, how many of them it
  * takes, and how many the player is carrying.
  *
- * <p>The rows are the items {@link BlockItems} says would place the blocks, not the blocks
- * themselves, so what the list asks for is what you would go and fetch - a stack of redstone rather
- * than a pile of wire, one door rather than its two halves.
+ * <p>The rows are what {@link BlockItems} says you would go and fetch, not the blocks the schematic
+ * holds - a stack of redstone rather than a pile of wire, a bucket rather than a block of water, one
+ * door rather than its two halves. A block that is no material of its own has no row at all: a
+ * piston head comes out of a piston, water runs from its source, fire is lit rather than placed.
  *
  * <p>Counting the schematic is a walk of every block in it and is done once, when the list is made.
  * Counting the inventory is 36 slots and is done again whenever the list is looked at, which is what
@@ -35,7 +36,6 @@ public final class MaterialList {
 
 	private final List<Entry> entries = new ArrayList<>();
 	private int totalNeeded;
-	private int unplaceable;
 
 	private MaterialList() {
 	}
@@ -57,7 +57,25 @@ public final class MaterialList {
 			this.itemId = itemId;
 			this.metadata = metadata;
 			this.matchDamage = matchDamage;
-			this.stack = new ItemStack(itemId, 1, Math.max(damage, 0));
+			this.stack = displayStack(itemId, damage);
+		}
+
+		/**
+		 * The stack a row is drawn from. A schematic written by a later version can carry metadata
+		 * this one never made - a slab laid upside down, say - and the game's own name and icon
+		 * tables are sized for the metadata it did, so the stack is tried before it is kept and the
+		 * plain item used where it does not hold up. A row that reads a little vaguely is a better
+		 * answer than a list that cannot be opened.
+		 */
+		private static ItemStack displayStack(int itemId, int damage) {
+			ItemStack stack = new ItemStack(itemId, 1, Math.max(damage, 0));
+			try {
+				stack.getTranslationKey();
+				stack.method_725();
+				return stack;
+			} catch (RuntimeException exception) {
+				return new ItemStack(itemId, 1, 0);
+			}
 		}
 
 		public ItemStack getStack() {
@@ -137,12 +155,11 @@ public final class MaterialList {
 			return;
 		}
 
-		int itemId = BlockItems.itemFor(blockId);
+		int itemId = BlockItems.materialFor(blockId, metadata);
 		Item item = BlockItems.itemAt(itemId);
 		if (item == null) {
-			// Nothing in the game places this. Counted rather than dropped, so what the list says
-			// still adds up to the schematic that was loaded.
-			this.unplaceable++;
+			// Nothing to go and fetch for it: a piston head comes out of a piston, water runs from a
+			// source of its own, fire is lit rather than placed.
 			return;
 		}
 
@@ -160,8 +177,9 @@ public final class MaterialList {
 			this.entries.add(entry);
 		}
 
-		entry.needed++;
-		this.totalNeeded++;
+		int count = BlockItems.materialCount(blockId);
+		entry.needed += count;
+		this.totalNeeded += count;
 	}
 
 	/**
@@ -226,10 +244,5 @@ public final class MaterialList {
 			missing += entry.getMissing();
 		}
 		return missing;
-	}
-
-	/** Blocks the schematic holds that no item in the game can place, and so has no row for. */
-	public int getUnplaceable() {
-		return this.unplaceable;
 	}
 }

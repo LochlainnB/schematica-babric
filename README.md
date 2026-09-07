@@ -54,11 +54,18 @@ Everything the loaded schematic is built out of, in one list: what it takes, how
 carrying and how much is still to be found. The **Materials** button on the move screen and Numpad
 `5` both open it.
 
-The rows are the items you would go and fetch rather than the blocks the schematic holds, which is
-the same question easy place asks when it puts a block in your hand - so a wall of redstone wire
-asks for redstone dust, a door asks for one door rather than its two halves, and a stack of white
-wool is a different row from a stack of red. Where the metadata is not something a stack carries -
-which way a piston ends up facing - every one of them is the same row, because any piston will do.
+The rows are the items you would go and fetch rather than the blocks the schematic holds, so a wall
+of redstone wire asks for redstone dust, a door asks for one door rather than its two halves, water
+asks for buckets, and a stack of white wool is a different row from a stack of red. Where the
+metadata is not something a stack carries - which way a piston faces, which way a stair turns -
+every one of them is the same row, because any piston will do.
+
+Blocks that are no material of their own are not listed at all, because there is nothing to fetch
+for them: the head of an extended piston comes out of the piston, the water in a pool ran there from
+its source, fire and portals are lit rather than placed. So an extended piston asks for one piston,
+and a pool asks for one bucket per source block rather than one per block of water. Anything you
+would genuinely have to carry is still listed even where survival cannot supply it - bedrock in a
+schematic is bedrock you need.
 
 The `Have` column is counted again every tick while the screen is open, so the numbers fall as you
 pick things up: empty a chest into your pack with the screen still open and you can watch what is
@@ -261,7 +268,7 @@ EasyPlace          what a right click is allowed to do while easy place is on
 HotbarRestock      brings a block onto the hotbar, and waits for the server to agree
 Sightline          walks the blocks along the line of sight, nearest first
 MaterialList       what a schematic is built out of, counted against an inventory
-BlockItems         which item puts a block down, and which stack of it
+BlockItems         which item puts a block down, and what you would go and fetch for it
 ```
 
 `Schematic` is deliberately free of world and rendering state, which is what lets `MaterialList`
@@ -343,12 +350,15 @@ reach is checked to be left to the ordinary path, which is what keeps this from 
 the common case.
 
 The material list is arithmetic over a schematic and an inventory, so it is checked with neither a
-world nor a screen: a schematic holding the three cases that make it more than a block count - an
-item that is not the block it places, a block put down by one item and standing as two, and one item
-whose stacks are different materials - is counted, then counted again against a pack that is filled
-in stages, which is the countdown itself. The screen over the top is opened for real on top of the
-loaded schematic and given a stack to find, so what the rows show is checked to be the schematic
-that is actually loaded rather than the one the test built.
+world nor a screen: a schematic holding the cases that make it more than a block count - an item
+that is not the block it places, a block put down by one item and standing as two, one item whose
+stacks are different materials, and one block built out of a pair of another - is counted, then
+counted again against a pack that is filled in stages, which is the countdown itself. A second one
+holds the blocks that are no material at all, so a piston head, the water that ran out of a source
+and stairs turned different ways are each checked to be counted the way they are built rather than
+the way they are stored. The screen over the top is opened for real on top of the loaded schematic
+and given a stack to find, so what the rows show is checked to be the schematic that is actually
+loaded rather than the one the test built.
 
 `./gradlew runClient -Psmoketest=multiplayer` joins a b1.7.3 server on `localhost:25565` instead of
 making a world, and checks easy place against it. This is the only way to exercise the half of the

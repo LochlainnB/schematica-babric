@@ -90,6 +90,18 @@ public final class SmokeTest {
 	private static final int WOODEN_DOOR_ITEM = 324;
 	/** The metadata bit the top half of a door carries, which no item places. */
 	private static final int DOOR_TOP = 8;
+	private static final int PISTON_HEAD = 34;
+	/** The metadata bit a piston carries while it is extended, and its head is out. */
+	private static final int EXTENDED = 8;
+	private static final int FLOWING_WATER = 8;
+	private static final int STILL_WATER = 9;
+	private static final int STILL_LAVA = 11;
+	private static final int WATER_BUCKET = 326;
+	private static final int LAVA_BUCKET = 327;
+	private static final int DOUBLE_SLAB = 43;
+	private static final int SLAB = 44;
+	/** A slab laid upside down, which is metadata b1.7.3 never made and a later version did. */
+	private static final int UPSIDE_DOWN = 8;
 
 	/** Nine blocks to fill the bar plus the gold, which is what the server is asked to hand out. */
 	private static final int TEST_STACKS = 10;
@@ -418,6 +430,47 @@ public final class SmokeTest {
 		check("and so does the total", list.getTotalMissing(), 5);
 
 		check("an empty schematic has nothing in it", MaterialList.of(null).getTotalNeeded(), 0);
+
+		// Blocks that are not their own material: what you fetch for them is something else, or
+		// there is nothing to fetch at all because they come with another block.
+		int[][][] parts = new int[2][2][2];
+		int[][][] partsMetadata = new int[2][2][2];
+		parts[0][0][0] = PISTON;
+		partsMetadata[0][0][0] = EXTENDED + 1;
+		parts[0][1][0] = PISTON_HEAD;
+		parts[1][0][0] = STILL_WATER;
+		parts[1][1][0] = FLOWING_WATER;
+		partsMetadata[1][1][0] = 3;
+		parts[0][0][1] = STILL_LAVA;
+		parts[0][1][1] = DOUBLE_SLAB;
+		parts[1][0][1] = WOOD_STAIRS;
+		parts[1][1][1] = WOOD_STAIRS;
+		partsMetadata[1][1][1] = 2;
+
+		MaterialList built = MaterialList.of(new Schematic(parts, partsMetadata, new ArrayList<>(), 2, 2, 2));
+
+		check("a piston head is no material of its own", materialNeeded(built, PISTON_HEAD, 0), -1);
+		check("the piston it came out of is", materialNeeded(built, PISTON, 0), 1);
+		check("water is asked for by the bucket, and only for the source",
+				materialNeeded(built, WATER_BUCKET, 0), 1);
+		check("and there is no row for the block itself", materialNeeded(built, STILL_WATER, 0), -1);
+		check("lava the same", materialNeeded(built, LAVA_BUCKET, 0), 1);
+		check("a double slab is two slabs", materialNeeded(built, SLAB, 0), 2);
+		check("stairs facing different ways are one material", materialNeeded(built, WOOD_STAIRS, 0), 2);
+		check("and nothing else crept in", built.getEntries().size(), 5);
+
+		// Metadata a later version wrote that this one never made. The row has to survive being
+		// named and drawn, and the sort names every row it compares.
+		int[][][] modern = new int[2][1][1];
+		int[][][] modernMetadata = new int[2][1][1];
+		modern[0][0][0] = SLAB;
+		modernMetadata[0][0][0] = UPSIDE_DOWN;
+		modern[1][0][0] = GOLD;
+
+		MaterialList later = MaterialList.of(new Schematic(modern, modernMetadata, new ArrayList<>(), 2, 1, 1));
+		check("a slab from a later version is still a row", later.getEntries().size(), 2);
+		checkText("named out of what this version does have",
+				materialRow(later, SLAB, 0).getName(), "Stone Slab");
 
 		Log.info("SMOKETEST: --- material list done ---");
 	}
@@ -1242,6 +1295,12 @@ public final class SmokeTest {
 		}
 		largeSchematicLoaded = true;
 		mc.setScreen(null);
+
+		if (mc.world == null) {
+			// A data-only run has no world to load a schematic into, and never had one.
+			Log.info("SMOKETEST: no world, skipping the large schematic");
+			return;
+		}
 
 		SchematicaState state = Schematica.STATE;
 		int[][][] blocks = new int[LARGE_WIDTH][LARGE_HEIGHT][LARGE_LENGTH];
