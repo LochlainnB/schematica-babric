@@ -2,6 +2,7 @@ package lunatrius.schematica;
 
 import java.io.File;
 
+import lunatrius.schematica.gui.InfoHud;
 import lunatrius.schematica.gui.MaterialListScreen;
 import lunatrius.schematica.gui.SchematicControlScreen;
 import lunatrius.schematica.gui.SchematicLoadScreen;
@@ -74,6 +75,11 @@ public class Schematica implements ClientModInitializer {
 	 * which mirrors how the original mod gated its keybinds.
 	 */
 	public static void onClientTick(Minecraft mc) {
+		// Ahead of everything else, including the screen check further down: the info HUD keeps
+		// counting behind an open screen, which is what shows the material list screen's own HUD
+		// buttons taking effect while they are being clicked.
+		InfoHud.tick(mc);
+
 		if (lunatrius.schematica.debug.SmokeTest.isEnabled()) {
 			lunatrius.schematica.debug.SmokeTest.tick(mc);
 			return;

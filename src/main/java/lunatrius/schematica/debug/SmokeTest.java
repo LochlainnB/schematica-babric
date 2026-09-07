@@ -10,6 +10,7 @@ import lunatrius.schematica.MaterialList;
 import lunatrius.schematica.Schematica;
 import lunatrius.schematica.SchematicaConfig;
 import lunatrius.schematica.SchematicaState;
+import lunatrius.schematica.gui.InfoHud;
 import lunatrius.schematica.gui.MaterialListScreen;
 import lunatrius.schematica.gui.SchematicControlScreen;
 import lunatrius.schematica.gui.SchematicLoadScreen;
@@ -361,6 +362,7 @@ public final class SmokeTest {
 		check("dropped block became air", result.schematic.getBlockId(0, 0, 0), 0);
 
 		runMaterialListTests();
+		runInfoHudTests();
 
 		Log.info("SMOKETEST: --- data layer done ---");
 	}
@@ -475,6 +477,82 @@ public final class SmokeTest {
 		Log.info("SMOKETEST: --- material list done ---");
 	}
 
+	/**
+	 * The info HUD's half of the list: which rows it shows, and in what order. Still only
+	 * arithmetic over a material list, so it needs no world and no screen either.
+	 */
+	private static void runInfoHudTests() {
+		Log.info("SMOKETEST: --- info hud ---");
+
+		// Three materials in plainly different amounts, so an order is unambiguous: four gold, two
+		// wool, one redstone.
+		int[][][] blocks = new int[4][2][1];
+		int[][][] metadata = new int[4][2][1];
+		blocks[0][0][0] = GOLD;
+		blocks[1][0][0] = GOLD;
+		blocks[2][0][0] = GOLD;
+		blocks[3][0][0] = GOLD;
+		blocks[0][1][0] = WOOL;
+		blocks[1][1][0] = WOOL;
+		blocks[2][1][0] = REDSTONE_WIRE;
+
+		MaterialList list = MaterialList.of(new Schematic(blocks, metadata, new ArrayList<>(), 4, 2, 1));
+		list.countInventory(new ItemStack[0]);
+
+		List<MaterialList.Entry> most = list.getOutstanding(MaterialList.Sort.DESCENDING);
+		check("the hud lists every row that is short", most.size(), 3);
+		check("the most to gather leads", most.get(0).getStack().itemId, GOLD);
+		check("then the next", most.get(1).getStack().itemId, WOOL);
+		check("then the least", most.get(2).getStack().itemId, REDSTONE_DUST);
+
+		List<MaterialList.Entry> fewest = list.getOutstanding(MaterialList.Sort.ASCENDING);
+		check("the other way up starts at the other end", fewest.get(0).getStack().itemId, REDSTONE_DUST);
+		check("and ends at this one", fewest.get(2).getStack().itemId, GOLD);
+
+		// A row leaves the hud once the player has enough of it, and is back the moment they do not.
+		ItemStack[] carried = new ItemStack[1];
+		carried[0] = new ItemStack(WOOL, 2, 0);
+		list.countInventory(carried);
+		check("a gathered row drops out", list.getOutstanding(MaterialList.Sort.DESCENDING).size(), 2);
+		checkTrue("and it is the gathered one that went",
+				hudRow(list.getOutstanding(MaterialList.Sort.DESCENDING), WOOL) == null);
+
+		carried[0] = new ItemStack(WOOL, 1, 0);
+		list.countInventory(carried);
+		List<MaterialList.Entry> back = list.getOutstanding(MaterialList.Sort.DESCENDING);
+		check("and comes back when the stack leaves the pack", back.size(), 3);
+		check("asking for what is still short, not the whole row", hudRow(back, WOOL).getMissing(), 1);
+
+		// Two rows level with each other: they have to come out the same way round whichever end
+		// the hud is sorting from, or a pile finished off would shuffle its neighbour about.
+		carried[0] = new ItemStack(GOLD, 2, 0);
+		list.countInventory(carried);
+		List<MaterialList.Entry> levelDown = list.getOutstanding(MaterialList.Sort.DESCENDING);
+		List<MaterialList.Entry> levelUp = list.getOutstanding(MaterialList.Sort.ASCENDING);
+		check("gold and wool are level now", levelDown.get(0).getMissing(), levelDown.get(1).getMissing());
+		checkTrue("and level rows keep their order in both sorts",
+				levelDown.get(0) == levelUp.get(1) && levelDown.get(1) == levelUp.get(2));
+
+		ItemStack[] everything = {
+				new ItemStack(GOLD, 4, 0), new ItemStack(WOOL, 2, 0), new ItemStack(REDSTONE_DUST, 1, 0) };
+		list.countInventory(everything);
+		check("nothing left to gather leaves the hud with no rows",
+				list.getOutstanding(MaterialList.Sort.DESCENDING).size(), 0);
+		check("though the list behind it still has every one", list.getEntries().size(), 3);
+
+		Log.info("SMOKETEST: --- info hud done ---");
+	}
+
+	/** The row for an item among the ones the hud is showing, or null if it is not showing it. */
+	private static MaterialList.Entry hudRow(List<MaterialList.Entry> rows, int itemId) {
+		for (MaterialList.Entry entry : rows) {
+			if (entry.getStack().itemId == itemId) {
+				return entry;
+			}
+		}
+		return null;
+	}
+
 	/** The row asking for a particular stack, by the item and damage it wants. */
 	private static MaterialList.Entry materialRow(MaterialList list, int itemId, int damage) {
 		for (MaterialList.Entry entry : list.getEntries()) {
@@ -538,6 +616,63 @@ public final class SmokeTest {
 		System.arraycopy(saved, 0, inventory.main, 0, saved.length);
 		mc.setScreen(before);
 		Log.info("SMOKETEST: --- material list screen done ---");
+	}
+
+	/**
+	 * The two buttons under the material list, and that the HUD they drive picks up what they say.
+	 * The drawing itself is left to the screenshot of scene 8; what is checked here is that the
+	 * buttons reach the HUD at all. Puts the settings back the way it found them.
+	 */
+	private static void runInfoHudScreenTests(Minecraft mc) {
+		SchematicaState state = Schematica.STATE;
+		if (state.schematic == null || mc.player == null) {
+			Log.info("SMOKETEST: no schematic loaded, skipping the info hud checks");
+			return;
+		}
+
+		Log.info("SMOKETEST: --- info hud screen ---");
+		SchematicaConfig config = Schematica.CONFIG;
+		boolean savedHud = config.infoHud;
+		MaterialList.Sort savedSort = config.infoHudSort;
+		Screen before = mc.currentScreen;
+
+		config.infoHud = false;
+		config.infoHudSort = MaterialList.Sort.DESCENDING;
+
+		MaterialListScreen screen = new MaterialListScreen(null);
+		mc.setScreen(screen);
+		InfoHud.tick(mc);
+		checkTrue("with the hud off there is nothing to draw", !InfoHud.isShowing());
+
+		clickButton(screen, buttonAt(screen, 0));
+		checkTrue("the button turns the hud on", config.infoHud);
+		InfoHud.tick(mc);
+		checkTrue("and the hud has it on the next tick", InfoHud.isShowing());
+		checkTrue("with something in it", !InfoHud.getRows().isEmpty());
+
+		List<MaterialList.Entry> most = InfoHud.getRows();
+		checkTrue("the most to gather leading",
+				most.get(0).getMissing() >= most.get(most.size() - 1).getMissing());
+
+		clickButton(screen, buttonAt(screen, 1));
+		checkTrue("the sort button turns the list round",
+				config.infoHudSort == MaterialList.Sort.ASCENDING);
+		InfoHud.tick(mc);
+		List<MaterialList.Entry> fewest = InfoHud.getRows();
+		checkTrue("and the hud draws it that way up",
+				fewest.get(0).getMissing() <= fewest.get(fewest.size() - 1).getMissing());
+
+		clickButton(screen, buttonAt(screen, 0));
+		checkTrue("the button turns the hud off again", !config.infoHud);
+		InfoHud.tick(mc);
+		checkTrue("and the hud goes with it", !InfoHud.isShowing());
+		check("with nothing left to draw", InfoHud.getRows().size(), 0);
+
+		config.infoHud = savedHud;
+		config.infoHudSort = savedSort;
+		config.save();
+		mc.setScreen(before);
+		Log.info("SMOKETEST: --- info hud screen done ---");
 	}
 
 	/** The mod's keys have to behave exactly like vanilla's once they are in the controls list. */
@@ -1216,6 +1351,7 @@ public final class SmokeTest {
 				runEasyPlaceTests(mc);
 				runCoordinateFieldTests(mc);
 				runMaterialScreenTests(mc);
+				runInfoHudScreenTests(mc);
 				state.rotateSchematic();
 				Log.info("SMOKETEST: scene 1 - rotated");
 				return;
@@ -1250,30 +1386,39 @@ public final class SmokeTest {
 				Log.info("SMOKETEST: scene 7 - material list");
 				return;
 			case 7:
-				mc.setScreen(new SchematicaSettingsScreen(null));
-				Log.info("SMOKETEST: scene 8 - settings screen");
+				// Back out to the world with the hud on. It draws from the vanilla hud rather than
+				// from a screen, so this is the only scene that can show it doing so.
+				mc.setScreen(null);
+				Schematica.CONFIG.infoHud = true;
+				Log.info("SMOKETEST: scene 8 - the info hud");
 				return;
 			case 8:
-				mc.setScreen(new KeybindsScreen(null, mc.options));
-				Log.info("SMOKETEST: scene 9 - vanilla controls screen");
+				// Left on over a screen, which is where a shot shows it drawing behind one.
+				mc.setScreen(new SchematicaSettingsScreen(null));
+				Log.info("SMOKETEST: scene 9 - settings screen, the info hud behind it");
 				return;
 			case 9:
-				mc.setScreen(new SchematicaKeysScreen(null));
-				Log.info("SMOKETEST: scene 10 - the mod's controls screen");
+				Schematica.CONFIG.infoHud = false;
+				mc.setScreen(new KeybindsScreen(null, mc.options));
+				Log.info("SMOKETEST: scene 10 - vanilla controls screen");
 				return;
 			case 10:
+				mc.setScreen(new SchematicaKeysScreen(null));
+				Log.info("SMOKETEST: scene 11 - the mod's controls screen");
+				return;
+			case 11:
 				if (openModList(mc)) {
-					Log.info("SMOKETEST: scene 11 - mod menu list");
+					Log.info("SMOKETEST: scene 12 - mod menu list");
 					return;
 				}
 				Log.info("SMOKETEST: Mod Menu is not installed, moving on");
 				// falls through when Mod Menu is not installed
-			case 11:
+			case 12:
 				// Guarded rather than plain, because the case above can fall into it.
 				loadLargeSchematic(mc);
 				return;
-			case 12:
 			case 13:
+			case 14:
 				cameraYaw += 50.0F;
 				Log.info("SMOKETEST: scene " + scene + " - the same schematic, camera turned to "
 						+ (int) cameraYaw + " degrees");

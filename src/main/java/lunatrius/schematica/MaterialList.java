@@ -52,6 +52,8 @@ public final class MaterialList {
 
 		private int needed;
 		private int have;
+		/** Looked up once and kept: the info HUD sorts on it, and does so again every tick. */
+		private String name;
 
 		private Entry(int itemId, int damage, int metadata, boolean matchDamage) {
 			this.itemId = itemId;
@@ -97,7 +99,14 @@ public final class MaterialList {
 
 		/** The name the game itself gives this stack, so a wool row says which colour it is. */
 		public String getName() {
-			String key = this.stack.getTranslationKey() + ".name";
+			if (this.name == null) {
+				this.name = lookUpName(this.stack);
+			}
+			return this.name;
+		}
+
+		private static String lookUpName(ItemStack stack) {
+			String key = stack.getTranslationKey() + ".name";
 			String name = Translations.get(key);
 			if (!name.equals(key)) {
 				return name;
@@ -244,5 +253,41 @@ public final class MaterialList {
 			missing += entry.getMissing();
 		}
 		return missing;
+	}
+
+	/** Which end of the list the info HUD puts first. */
+	public enum Sort {
+		/** Most left to gather at the top, so the long jobs lead. */
+		DESCENDING,
+		/** Fewest left to gather at the top, so the rows about to finish lead. */
+		ASCENDING
+	}
+
+	/**
+	 * The rows that are still short, in the order the info HUD wants them.
+	 *
+	 * <p>A finished row is left out rather than greyed out: the HUD is the list of what to go and
+	 * find, and a row that is done is not that. Nothing is remembered between calls, so the row
+	 * comes straight back if the stack leaves the pack again.
+	 *
+	 * <p>Sorting on what is missing does shuffle the rows about while the player gathers, which is
+	 * the opposite of what the screen does - but it is what keeps the next thing to fetch at a
+	 * known end of a HUD only a few rows tall, and it is the sort that was asked for.
+	 */
+	public List<Entry> getOutstanding(Sort order) {
+		List<Entry> outstanding = new ArrayList<>();
+		for (Entry entry : this.entries) {
+			if (entry.getMissing() > 0) {
+				outstanding.add(entry);
+			}
+		}
+
+		outstanding.sort((left, right) -> {
+			int difference = order == Sort.ASCENDING
+					? left.getMissing() - right.getMissing()
+					: right.getMissing() - left.getMissing();
+			return difference != 0 ? difference : left.getName().compareToIgnoreCase(right.getName());
+		});
+		return outstanding;
 	}
 }

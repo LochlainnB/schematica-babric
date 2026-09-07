@@ -4,29 +4,37 @@ import java.util.Locale;
 
 import lunatrius.schematica.MaterialList;
 import lunatrius.schematica.Schematica;
-import lunatrius.schematica.schematic.SchematicWorld;
+import lunatrius.schematica.SchematicaConfig;
 import lunatrius.schematica.util.Translations;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.entity.player.PlayerEntity;
 
 /**
  * Everything the loaded schematic is built out of, and how much of it the player is carrying.
  *
- * <p>The schematic side of the list is counted once, when the screen opens, since only loading or
- * transforming a schematic can change it and neither can happen from here. The inventory side is
- * counted again every tick, which is what makes the numbers fall while the screen is open - a chest
- * emptied into the pack shows up without closing anything.
+ * <p>The schematic side of the list is counted once and shared with the info HUD, since only
+ * loading or transforming a schematic can change it. The inventory side is counted again every
+ * tick, which is what makes the numbers fall while the screen is open - a chest emptied into the
+ * pack shows up without closing anything.
+ *
+ * <p>The two buttons at the bottom drive {@link InfoHud}, which is the same list in the corner of
+ * the screen while playing. They are here rather than in the settings because this is where a
+ * player is already looking at the list and deciding what to do about it.
  */
 public class MaterialListScreen extends Screen {
 	private static final int LIST_TOP = 40;
-	/** Height of the footer: the totals line and the Done button under it. */
-	private static final int FOOTER_HEIGHT = 44;
+	/** Height of the footer: the totals line, the two HUD buttons and Done under them. */
+	private static final int FOOTER_HEIGHT = 72;
+	/** The two-column grid the settings screen uses, so the mod's buttons all line up. */
+	private static final int COLUMN_WIDTH = 150;
 
+	private final SchematicaConfig config = Schematica.CONFIG;
 	private final Screen parent;
 
 	private MaterialList materials;
 	private MaterialListWidget list;
+	private ButtonWidget btnHud;
+	private ButtonWidget btnSort;
 	private ButtonWidget btnDone;
 
 	public MaterialListScreen(Screen parent) {
@@ -35,35 +43,36 @@ public class MaterialListScreen extends Screen {
 
 	@Override
 	public void init() {
-		if (this.materials == null) {
-			// init() runs again on every resize, and walking the whole schematic again for a window
-			// that changed size would be work for nothing.
-			SchematicWorld schematic = Schematica.STATE.schematic;
-			this.materials = MaterialList.of(schematic == null ? null : schematic.getSchematic());
-		}
-		this.countInventory();
+		// Counted once and kept: init() runs again on every resize, and walking the whole schematic
+		// again for a window that changed size would be work for nothing.
+		this.materials = Schematica.STATE.getMaterials();
+		Schematica.STATE.countMaterials();
 
-		this.btnDone = new ButtonWidget(
-				0, this.width / 2 - 100, this.height - 28, 200, 20, Translations.get("schematic.done"));
-		this.buttons.add(this.btnDone);
+		this.btnHud = this.addButton(
+				0, this.width / 2 - 155, this.height - 52, COLUMN_WIDTH, 20, this.hudLabel());
+		this.btnSort = this.addButton(
+				1, this.width / 2 + 5, this.height - 52, COLUMN_WIDTH, 20, this.sortLabel());
+		this.btnDone = this.addButton(
+				2, this.width / 2 - 100, this.height - 28, 200, 20, Translations.get("schematic.done"));
 
 		this.list = new MaterialListWidget(this, LIST_TOP, this.height - FOOTER_HEIGHT);
-		this.list.registerButtons(this.buttons, 1, 2);
+		this.list.registerButtons(this.buttons, 3, 4);
 	}
 
-	/** The list this screen is showing, counted when it opened. */
+	private ButtonWidget addButton(int id, int x, int y, int width, int height, String text) {
+		ButtonWidget button = new ButtonWidget(id, x, y, width, height, text);
+		this.buttons.add(button);
+		return button;
+	}
+
+	/** The list this screen is showing, which is the one the whole mod shares. */
 	public MaterialList getMaterials() {
 		return this.materials;
 	}
 
 	@Override
 	public void tick() {
-		this.countInventory();
-	}
-
-	private void countInventory() {
-		PlayerEntity player = this.minecraft != null ? this.minecraft.player : null;
-		this.materials.countInventory(player != null ? player.inventory.main : null);
+		Schematica.STATE.countMaterials();
 	}
 
 	@Override
@@ -72,11 +81,33 @@ public class MaterialListScreen extends Screen {
 			return;
 		}
 
-		if (button == this.btnDone) {
+		if (button == this.btnHud) {
+			this.config.infoHud = !this.config.infoHud;
+			this.btnHud.text = this.hudLabel();
+			this.config.save();
+		} else if (button == this.btnSort) {
+			this.config.infoHudSort = this.config.infoHudSort == MaterialList.Sort.DESCENDING
+					? MaterialList.Sort.ASCENDING
+					: MaterialList.Sort.DESCENDING;
+			this.btnSort.text = this.sortLabel();
+			this.config.save();
+		} else if (button == this.btnDone) {
 			this.minecraft.setScreen(this.parent);
 		} else {
 			this.list.buttonClicked(button);
 		}
+	}
+
+	private String hudLabel() {
+		return Translations.get("schematic.materials.hud") + ": "
+				+ Translations.get(this.config.infoHud ? "options.on" : "options.off");
+	}
+
+	private String sortLabel() {
+		return Translations.get("schematic.materials.hud.sort") + ": "
+				+ Translations.get(this.config.infoHudSort == MaterialList.Sort.ASCENDING
+						? "schematic.materials.hud.sort.ascending"
+						: "schematic.materials.hud.sort.descending");
 	}
 
 	@Override

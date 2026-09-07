@@ -6,8 +6,8 @@ A port of Lunatrius' Schematica 1.2.0.10 for Minecraft Beta 1.7.3 from Risugami'
 
 Load an MCEdit `.schematic` file and it is drawn over the world as a ghost you can build against,
 with colour-coded boxes showing what is missing or wrong. You can also select a region of the world
-and save it back out as a schematic. A material list says what the whole thing will take, and
-counts down as you gather it.
+and save it back out as a schematic. A material list says what the whole thing will take and counts
+down as you gather it, on a screen or in the corner of the screen while you build.
 
 ## Using it
 
@@ -75,6 +75,27 @@ ever counted towards one row.
 
 The order is what the schematic takes most of first, and it holds still while you gather: sorting by
 what is missing would shuffle the rows about under you as the numbers changed.
+
+#### Info HUD
+
+The same list in the bottom right corner of the screen while you play, so what is left to gather is
+in front of you while you are gathering it rather than behind a screen. **Info HUD** at the bottom
+of the material list turns it on, and it stays on across sessions.
+
+It only lists what is still a job. A row leaves the HUD the moment you are carrying enough of that
+material and comes back the moment you are not, so what is left on screen is what is left to find;
+when there is nothing left it says so rather than disappearing, which is the difference between
+finished and switched off. Rows are counted again every tick, whether or not a screen is open, so
+you can watch a row go while sorting a chest.
+
+**HUD Sort** puts either the most or the fewest left to gather at the top. Unlike the screen, the
+HUD does sort on what is missing - it is a few rows in a corner rather than a whole list, so the row
+that matters has to be at a known end of it. Rows that are level with each other are ordered by name
+whichever way round the sort is, so finishing one pile does not shuffle its neighbours.
+
+The HUD shows as many rows as fit in half the screen, up to ten, with a count of what did not fit
+underneath. It sits in the very corner when it is narrow enough to stay clear of the hotbar and
+above the hearts when it is not, and F1 hides it along with the rest of the interface.
 
 ### Easy place
 
@@ -259,9 +280,10 @@ gui/         AxisScreen          routes clicks, keys and the tab order to the fo
              SchematicaKeysScreen  rebinds the mod's keys, which vanilla's screen cannot fit
              MaterialListScreen    what the schematic takes, against what is in the pack
              MaterialListWidget    one row of it: the icon, the name and the two counts
+             InfoHud               the same list in the corner of the screen, while playing
              four more Screens and a slider widget
 compat/      ModMenuIntegration  optional, loaded only when Mod Menu asks for it
-mixin/       six small hooks (see below)
+mixin/       seven small hooks (see below)
 SchematicaState    everything about the current session
 SchematicaConfig   the render settings, and the keybinds it hands to vanilla
 EasyPlace          what a right click is allowed to do while easy place is on
@@ -282,6 +304,7 @@ work on the same way.
 | `MinecraftMixin`            | `init`, `tick`, world change, use | initialise after the GL context exists; poll keys; reset state; easy place |
 | `GameOptionsMixin`          | `GameOptions.load`              | add the mod's keys to the list Controls and options.txt walk    |
 | `GameRendererMixin`         | `class_555.method_1847` (weather) | the one point inside the world pass with the camera set up      |
+| `InGameHudMixin`            | `InGameHud.render`              | draw the info HUD after it, under whatever screen is open       |
 | `WorldMixin`                | `World.method_243`              | invalidate the overlay when a block inside it changes           |
 | `TranslationStorageAccessor`| `TranslationStorage`            | merge this mod's language file into the vanilla table           |
 | `ClientNetworkHandlerMixin` | the transaction packet          | hear whether the server took an inventory swap                  |
@@ -303,7 +326,7 @@ Behaviour is otherwise the same as 1.2.0.10; these are deliberate changes:
   all rather than one it made differently. See above for what it does and does not take over.
 - **A material list.** The original drew a schematic and left working out what it would take to
   build entirely to you. This counts it, in the items you would go and fetch, and counts your
-  inventory against it.
+  inventory against it - on a screen, or in a HUD in the corner listing only what is still short.
 - **Rotate and mirror move block entities.** The original left signs and chests at their old
   coordinates after a transform.
 - **A fresh dimension backs `SchematicWorld`.** The original passed the live world's dimension to
@@ -359,6 +382,14 @@ and stairs turned different ways are each checked to be counted the way they are
 the way they are stored. The screen over the top is opened for real on top of the loaded schematic
 and given a stack to find, so what the rows show is checked to be the schematic that is actually
 loaded rather than the one the test built.
+
+The info HUD is the same list read a different way, so it is checked the same way: a list is sorted
+from both ends and the order asserted outright, a row is gathered and checked to have left the HUD,
+the stack is taken back out of the pack and the row checked to have come back asking only for what
+is still short, and two rows level with each other are checked to come out the same way round from
+either sort. The buttons under the material list are then clicked for real and the HUD asked what it
+would draw, which is what joins the two halves. Scene 8 is a screenshot of it over the world and
+scene 9 one of it behind an open screen, since whether it draws is not something the checks can say.
 
 `./gradlew runClient -Psmoketest=multiplayer` joins a b1.7.3 server on `localhost:25565` instead of
 making a world, and checks easy place against it. This is the only way to exercise the half of the

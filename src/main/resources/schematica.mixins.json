@@ -10,6 +10,7 @@
 		"ClientNetworkHandlerMixin",
 		"GameOptionsMixin",
 		"GameRendererMixin",
+		"InGameHudMixin",
 		"MinecraftMixin",
 		"TranslationStorageAccessor"
 	],

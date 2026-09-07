@@ -18,6 +18,7 @@ import lunatrius.schematica.util.Vec3i;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.class_13;
 import net.minecraft.client.Minecraft;
+import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.world.World;
 
@@ -66,6 +67,11 @@ public class SchematicaState {
 	/** Set whenever the cached geometry is stale and must be rebuilt next frame. */
 	public boolean needsUpdate = true;
 
+	/** What the loaded schematic is built out of, counted on demand and kept until it changes. */
+	private MaterialList materials = null;
+	/** The schematic {@link #materials} was counted from, so a different one is noticed. */
+	private Schematic materialsCountedFrom = null;
+
 	public Minecraft getMinecraft() {
 		return Schematica.getMinecraft();
 	}
@@ -109,6 +115,7 @@ public class SchematicaState {
 			this.blockRenderer = new class_13(this.schematic);
 			this.isRenderingSchematic = true;
 			this.needsUpdate = true;
+			this.invalidateMaterials();
 
 			Log.info("Loaded " + file.getName() + " ("
 					+ result.schematic.getWidth() + "x" + result.schematic.getHeight() + "x" + result.schematic.getLength() + ")");
@@ -130,6 +137,7 @@ public class SchematicaState {
 		this.isRenderingSchematic = false;
 		this.renderingLayer = -1;
 		this.needsUpdate = true;
+		this.invalidateMaterials();
 	}
 
 	/**
@@ -195,6 +203,44 @@ public class SchematicaState {
 			Log.error("Failed to save schematic " + file.getName(), exception);
 			return false;
 		}
+	}
+
+	// --- materials ---------------------------------------------------------------------------
+
+	/**
+	 * What the loaded schematic is built out of.
+	 *
+	 * <p>Kept rather than counted per call: the count is a walk of every block in the schematic,
+	 * and both the material list screen and the info HUD ask for it many times a second. Only
+	 * loading, clearing or turning a schematic can change the answer, and each of those drops it.
+	 */
+	public MaterialList getMaterials() {
+		Schematic loaded = this.schematic == null ? null : this.schematic.getSchematic();
+		if (this.materials == null || this.materialsCountedFrom != loaded) {
+			this.materials = MaterialList.of(loaded);
+			this.materialsCountedFrom = loaded;
+		}
+		return this.materials;
+	}
+
+	/** Recounts the pack against the list, which is the half of it that moves. */
+	public void countMaterials() {
+		Minecraft mc = this.getMinecraft();
+		PlayerEntity player = mc == null ? null : mc.player;
+		this.getMaterials().countInventory(player == null ? null : player.inventory.main);
+	}
+
+	/**
+	 * Drops the counted list so the next look at it counts again.
+	 *
+	 * <p>Turning a schematic cannot really change what it is built out of - only orientation
+	 * metadata moves, and no two stacks of one item differ by orientation - but a rotation already
+	 * rebuilds the whole overlay, so counting again costs nothing next to what it is doing anyway
+	 * and does not rest on that staying true.
+	 */
+	private void invalidateMaterials() {
+		this.materials = null;
+		this.materialsCountedFrom = null;
 	}
 
 	// --- placement ---------------------------------------------------------------------------
@@ -282,6 +328,7 @@ public class SchematicaState {
 			this.schematic.getSchematic().mirrorZ();
 			this.schematic.refreshBlockEntities();
 			this.needsUpdate = true;
+			this.invalidateMaterials();
 		}
 	}
 
@@ -290,6 +337,7 @@ public class SchematicaState {
 			this.schematic.getSchematic().rotate();
 			this.schematic.refreshBlockEntities();
 			this.needsUpdate = true;
+			this.invalidateMaterials();
 		}
 	}
 

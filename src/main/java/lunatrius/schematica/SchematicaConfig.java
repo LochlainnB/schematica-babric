@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Properties;
 
 import lunatrius.schematica.util.Log;
@@ -56,6 +57,16 @@ public class SchematicaConfig {
 	/** How far the highlight boxes are inflated so they do not z-fight with the block faces. */
 	public float blockDelta = 0.005F;
 
+	/**
+	 * Draw what is left to gather in the corner of the screen while playing.
+	 *
+	 * <p>A setting rather than session state, unlike the render toggles: it is how the player wants
+	 * to be shown the list, not something they step in and out of over one build.
+	 */
+	public boolean infoHud = false;
+	/** Which end of the material list the info HUD puts at the top. */
+	public MaterialList.Sort infoHudSort = MaterialList.Sort.DESCENDING;
+
 	/** Largest value the settings screen offers for {@link #blockDelta}. */
 	public static final float MAX_BLOCK_DELTA = 0.05F;
 
@@ -86,6 +97,8 @@ public class SchematicaConfig {
 		this.alpha = clamp(readFloat(properties, "alpha", this.alpha), 0.0F, 1.0F);
 		this.highlight = readBoolean(properties, "highlight", this.highlight);
 		this.blockDelta = clamp(readFloat(properties, "blockDelta", this.blockDelta), 0.0F, 0.5F);
+		this.infoHud = readBoolean(properties, "infoHud", this.infoHud);
+		this.infoHudSort = readSort(properties, "infoHudSort", this.infoHudSort);
 
 		this.migrateKeybinds(properties);
 	}
@@ -132,6 +145,8 @@ public class SchematicaConfig {
 		properties.setProperty("alpha", Float.toString(this.alpha));
 		properties.setProperty("highlight", Boolean.toString(this.highlight));
 		properties.setProperty("blockDelta", Float.toString(this.blockDelta));
+		properties.setProperty("infoHud", Boolean.toString(this.infoHud));
+		properties.setProperty("infoHudSort", this.infoHudSort.name().toLowerCase(Locale.ROOT));
 
 		try (OutputStream stream = new FileOutputStream(this.file)) {
 			properties.store(stream, "Schematica - keybinds live in Options > Controls");
@@ -173,6 +188,17 @@ public class SchematicaConfig {
 
 	private static boolean readBoolean(Properties properties, String key, boolean fallback) {
 		return Boolean.parseBoolean(properties.getProperty(key, Boolean.toString(fallback)).trim());
+	}
+
+	/** Reads a sort order by name, ignoring case, so a hand-edited config is forgiving. */
+	private static MaterialList.Sort readSort(Properties properties, String key, MaterialList.Sort fallback) {
+		String value = properties.getProperty(key, fallback.name()).trim();
+		for (MaterialList.Sort sort : MaterialList.Sort.values()) {
+			if (sort.name().equalsIgnoreCase(value)) {
+				return sort;
+			}
+		}
+		return fallback;
 	}
 
 	private static float clamp(float value, float min, float max) {
