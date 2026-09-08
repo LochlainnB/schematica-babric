@@ -9,6 +9,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
 
+import lunatrius.schematica.BlockPalette;
 import lunatrius.schematica.EasyPlace;
 import lunatrius.schematica.HotbarRestock;
 import lunatrius.schematica.MaterialList;
@@ -19,6 +20,9 @@ import lunatrius.schematica.Schematica;
 import lunatrius.schematica.SchematicaConfig;
 import lunatrius.schematica.SchematicaState;
 import lunatrius.schematica.compat.CreativeMode;
+import lunatrius.schematica.gui.BlockChoiceScreen;
+import lunatrius.schematica.gui.BlockListScreen;
+import lunatrius.schematica.gui.BlockReplaceScreen;
 import lunatrius.schematica.gui.InfoHud;
 import lunatrius.schematica.gui.MaterialListScreen;
 import lunatrius.schematica.gui.SchematicControlScreen;
@@ -27,6 +31,7 @@ import lunatrius.schematica.gui.SchematicSaveScreen;
 import lunatrius.schematica.gui.SchematicaKeysScreen;
 import lunatrius.schematica.gui.SchematicaSettingsScreen;
 import lunatrius.schematica.render.SchematicRenderer;
+import lunatrius.schematica.schematic.BlockSwap;
 import lunatrius.schematica.schematic.Schematic;
 import lunatrius.schematica.schematic.SchematicFormat;
 import lunatrius.schematica.schematic.SchematicWorld;
@@ -143,6 +148,30 @@ public final class SmokeTest {
 	private static final int SLAB = 44;
 	/** A slab laid upside down, which is metadata b1.7.3 never made and a later version did. */
 	private static final int UPSIDE_DOWN = 8;
+
+	/** Blocks the replace tests swap between, and the awkward metadata they carry. */
+	private static final int STONE = 1;
+	private static final int GLASS = 20;
+	private static final int LEAVES = 18;
+	private static final int CHEST = 54;
+	private static final int COBBLESTONE_STAIRS = 67;
+	private static final int IRON_DOOR = 71;
+	private static final int RAIL = 66;
+	private static final int POWERED_RAIL = 27;
+	private static final int REDSTONE_ORE = 73;
+	/** The lit one, which the game turns on and off and nobody puts down. */
+	private static final int LIT_REDSTONE_ORE = 74;
+	private static final int BLUE_WOOL = 11;
+	/** A rail bent round a corner, which is a shape only a plain rail has. */
+	private static final int RAIL_CURVE = 6;
+	/** Birch leaves carrying the flag that stops them rotting away. */
+	private static final int LEAVES_BIRCH_KEPT = 6;
+	/** The top half of a door, hinged on the far side. */
+	private static final int DOOR_UPPER_HINGE = 9;
+	/** A powered rail running north to south with a current in it. */
+	private static final int RAIL_POWERED_NS = 10;
+	/** Its own file, so that saving over it cannot touch the one the rest of the run uses. */
+	private static final String REPLACE_FILE = "smoketest-replace.schematic";
 
 	/** Nine blocks to fill the bar plus the gold, which is what the server is asked to hand out. */
 	private static final int TEST_STACKS = 10;
@@ -440,6 +469,7 @@ public final class SmokeTest {
 
 		runMaterialListTests();
 		runInfoHudTests();
+		runBlockSwapTests();
 
 		Log.info("SMOKETEST: --- data layer done ---");
 	}
@@ -2102,6 +2132,7 @@ public final class SmokeTest {
 				runMaterialScreenTests(mc);
 				runInfoHudScreenTests(mc);
 				runMultipleSchematicTests(mc);
+				runReplaceScreenTests(mc);
 				state.rotateSchematic();
 				Log.info("SMOKETEST: scene 1 - rotated");
 				return;
@@ -2176,6 +2207,12 @@ public final class SmokeTest {
 				return;
 			case 15:
 				setUpPickerScene(mc);
+				return;
+			case 16:
+				setUpReplaceScene(mc);
+				return;
+			case 17:
+				setUpChoiceScene(mc);
 				return;
 			default:
 				mc.setScreen(null);
@@ -3824,5 +3861,387 @@ public final class SmokeTest {
 		}
 
 		Log.info("SMOKETEST: --- easy place in mid air done ---");
+	}
+
+	/**
+	 * Which blocks can stand in for which, what a swap does to their metadata, and that a swap
+	 * reaches the blocks it should and none of the ones it should not.
+	 *
+	 * <p>On a schematic written here rather than on the run's own, because the cases worth checking
+	 * are the awkward blocks - a rail with a bend in it, leaves carrying a flag, two colours of the
+	 * same wool, a chest with something inside it - and a structure holding all of those is easier
+	 * to write down than to build.
+	 */
+	private static void runBlockSwapTests() {
+		Log.info("SMOKETEST: --- replacing blocks ---");
+
+		// 4 wide and 3 long: a row of cubes and stairs, a row of colours and awkward blocks, and a
+		// row of the ones whose metadata is worth the most.
+		int[][][] blocks = new int[4][1][3];
+		int[][][] metadata = new int[4][1][3];
+		blocks[0][0][0] = COBBLESTONE;
+		blocks[1][0][0] = COBBLESTONE;
+		blocks[2][0][0] = WOOD_STAIRS;
+		metadata[2][0][0] = 2;
+		blocks[3][0][0] = WOOD_STAIRS;
+		metadata[3][0][0] = 3;
+		blocks[0][0][1] = WOOL;
+		blocks[1][0][1] = WOOL;
+		metadata[1][0][1] = RED_WOOL;
+		blocks[2][0][1] = CHEST;
+		blocks[3][0][1] = RAIL;
+		metadata[3][0][1] = RAIL_CURVE;
+		blocks[0][0][2] = TORCH;
+		metadata[0][0][2] = TORCH_AGAINST_EAST;
+		blocks[1][0][2] = LEAVES;
+		metadata[1][0][2] = LEAVES_BIRCH_KEPT;
+		blocks[2][0][2] = WOODEN_DOOR;
+		metadata[2][0][2] = DOOR_UPPER_HINGE;
+		blocks[3][0][2] = LIT_REDSTONE_ORE;
+
+		Schematic schematic = new Schematic(blocks, metadata, new ArrayList<>(), 4, 1, 3);
+		BlockPalette palette = BlockPalette.of(schematic);
+
+		check("the palette has a row for each kind of block", palette.getEntries().size(), 10);
+		check("counting each of them", paletteCount(palette, COBBLESTONE, 0), 2);
+		check("telling two colours of one block apart", paletteCount(palette, WOOL, 0), 1);
+		check("as a row of its own", paletteCount(palette, WOOL, RED_WOOL), 1);
+		check("while one block facing two ways is a single row", paletteCount(palette, WOOD_STAIRS, 0), 2);
+		check("and air is no row at all", paletteCount(palette, 0, 0), 0);
+
+		// --- what may stand in for what ---
+		BlockPalette.Entry cobblestone = paletteEntry(palette, COBBLESTONE, 0);
+		checkTrue("a full cube may be swapped for another", offers(cobblestone, STONE, 0));
+		checkTrue("including one the light comes through", offers(cobblestone, GLASS, 0));
+		checkTrue("and one of a colour", offers(cobblestone, WOOL, RED_WOOL));
+		checkTrue("but not for a different shape", !offers(cobblestone, WOOD_STAIRS, 0));
+		checkTrue("nor for a block that holds something", !offers(cobblestone, CHEST, 0));
+		checkTrue("nor for itself", !offers(cobblestone, COBBLESTONE, 0));
+		checkTrue("the lit half of a pair is never offered", !offers(cobblestone, LIT_REDSTONE_ORE, 0));
+		checkTrue("though the ordinary one is", offers(cobblestone, REDSTONE_ORE, 0));
+
+		checkTrue("a block with a block entity can be replaced by nothing at all",
+				!paletteEntry(palette, CHEST, 0).hasReplacements());
+		checkTrue("but the lit half of a pair can still be replaced",
+				paletteEntry(palette, LIT_REDSTONE_ORE, 0).hasReplacements());
+
+		BlockPalette.Entry stairs = paletteEntry(palette, WOOD_STAIRS, 0);
+		check("stairs have one other kind of stairs to be", stairs.getReplacements().size(), 1);
+		checkTrue("and that is what it is", offers(stairs, COBBLESTONE_STAIRS, 0));
+
+		BlockPalette.Entry door = paletteEntry(palette, WOODEN_DOOR, 0);
+		check("a door has the other door", door.getReplacements().size(), 1);
+		checkTrue("and it is the iron one", offers(door, IRON_DOOR, 0));
+
+		BlockPalette.Entry torch = paletteEntry(palette, TORCH, 0);
+		checkTrue("a torch may become a redstone torch", offers(torch, LIT_REDSTONE_TORCH, 0));
+		checkTrue("but not the unlit one, which is the same thing twice",
+				!offers(torch, REDSTONE_TORCH, 0));
+
+		BlockPalette.Entry leaves = paletteEntry(palette, LEAVES, 2);
+		checkTrue("leaves of one kind may become another", offers(leaves, LEAVES, 0));
+		checkTrue("and leaves may become a solid cube", offers(leaves, STONE, 0));
+
+		// A rail is the one shape a schematic can hold that another block in its family cannot take.
+		BlockPalette.Entry bent = paletteEntry(palette, RAIL, 0);
+		checkTrue("a rail with a bend in it cannot become a powered rail",
+				!offers(bent, POWERED_RAIL, 0));
+
+		int[][][] straightBlocks = new int[2][1][1];
+		int[][][] straightMetadata = new int[2][1][1];
+		straightBlocks[0][0][0] = RAIL;
+		straightBlocks[1][0][0] = RAIL;
+		straightMetadata[1][0][0] = 5;
+		BlockPalette straight = BlockPalette.of(
+				new Schematic(straightBlocks, straightMetadata, new ArrayList<>(), 2, 1, 1));
+		checkTrue("while a line of straight and sloped ones can",
+				offers(paletteEntry(straight, RAIL, 0), POWERED_RAIL, 0));
+
+		// --- what a swap does to the metadata ---
+		check("stairs keep the way they face",
+				BlockSwap.metadataFor(WOOD_STAIRS, 2, COBBLESTONE_STAIRS, 0), 2);
+		check("each of them its own way",
+				BlockSwap.metadataFor(WOOD_STAIRS, 3, COBBLESTONE_STAIRS, 0), 3);
+		check("and one laid upside down stays upside down",
+				BlockSwap.metadataFor(WOOD_STAIRS, 4 | 2, COBBLESTONE_STAIRS, 0), 4 | 2);
+		check("a torch keeps the wall it hangs on",
+				BlockSwap.metadataFor(TORCH, TORCH_AGAINST_EAST, LIT_REDSTONE_TORCH, 0), TORCH_AGAINST_EAST);
+		check("a door keeps its half and its hinge",
+				BlockSwap.metadataFor(WOODEN_DOOR, DOOR_UPPER_HINGE, IRON_DOOR, 0), DOOR_UPPER_HINGE);
+		check("leaves keep the flag that stops them rotting",
+				BlockSwap.metadataFor(LEAVES, LEAVES_BIRCH_KEPT, LEAVES, 0), LEAVES_BIRCH_KEPT & ~3);
+		check("a slab laid upside down stays there", BlockSwap.metadataFor(SLAB, UPSIDE_DOWN, SLAB, 3),
+				UPSIDE_DOWN | 3);
+		check("a powered rail becoming a plain one leaves the current behind",
+				BlockSwap.metadataFor(POWERED_RAIL, RAIL_POWERED_NS, RAIL, 0), RAIL_POWERED_NS & 7);
+		check("a colour is not carried into a block that has none",
+				BlockSwap.metadataFor(WOOL, RED_WOOL, STONE, 0), 0);
+		check("and one that has is given it",
+				BlockSwap.metadataFor(STONE, 0, WOOL, RED_WOOL), RED_WOOL);
+
+		// --- and what it does to the schematic ---
+		int replaced = BlockPalette.replace(schematic, stairs, choice(stairs, COBBLESTONE_STAIRS, 0));
+		check("replacing reaches every one of them", replaced, 2);
+		check("the first is the new block", schematic.getBlockId(2, 0, 0), COBBLESTONE_STAIRS);
+		check("still facing the way it did", schematic.getMetadata(2, 0, 0), 2);
+		check("and so is the second", schematic.getBlockId(3, 0, 0), COBBLESTONE_STAIRS);
+		check("facing its own way", schematic.getMetadata(3, 0, 0), 3);
+		check("with the cobblestone beside them untouched", schematic.getBlockId(0, 0, 0), COBBLESTONE);
+
+		BlockPalette.Entry white = paletteEntry(palette, WOOL, 0);
+		check("replacing one colour reaches only that colour",
+				BlockPalette.replace(schematic, white, choice(white, WOOL, BLUE_WOOL)), 1);
+		check("the one that was white is blue", schematic.getMetadata(0, 0, 1), BLUE_WOOL);
+		check("and the red one is still red", schematic.getMetadata(1, 0, 1), RED_WOOL);
+		check("both of them still wool", schematic.getBlockId(1, 0, 1), WOOL);
+
+		Log.info("SMOKETEST: --- replacing blocks done ---");
+	}
+
+	/** How many of one block and variant a palette counted, or zero where it has no row for it. */
+	private static int paletteCount(BlockPalette palette, int blockId, int variant) {
+		for (BlockPalette.Entry entry : palette.getEntries()) {
+			if (entry.getBlockId() == blockId && entry.getVariant() == variant) {
+				return entry.getCount();
+			}
+		}
+		return 0;
+	}
+
+	private static BlockPalette.Entry paletteEntry(BlockPalette palette, int blockId, int variant) {
+		for (BlockPalette.Entry entry : palette.getEntries()) {
+			if (entry.getBlockId() == blockId && entry.getVariant() == variant) {
+				return entry;
+			}
+		}
+		fail("the palette has no row for block " + blockId + ":" + variant, null);
+		return null;
+	}
+
+	/** Whether one block is on another's list of what could stand in for it. */
+	private static boolean offers(BlockPalette.Entry entry, int blockId, int variant) {
+		if (entry == null) {
+			return false;
+		}
+		for (BlockPalette.Entry replacement : entry.getReplacements()) {
+			if (replacement.getBlockId() == blockId && replacement.getVariant() == variant) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** The offered block a test means to pick, which has to be one that was really offered. */
+	private static BlockPalette.Entry choice(BlockPalette.Entry entry, int blockId, int variant) {
+		for (BlockPalette.Entry replacement : entry.getReplacements()) {
+			if (replacement.getBlockId() == blockId && replacement.getVariant() == variant) {
+				return replacement;
+			}
+		}
+		fail("block " + blockId + ":" + variant + " was never offered as a replacement", null);
+		return null;
+	}
+
+	/**
+	 * The two replace screens, driven the way a player drives them: the list of what a schematic is
+	 * made of, the button on a row, the list of what could go there instead, and Save.
+	 *
+	 * <p>On a schematic of its own written for the purpose, so that saving cannot write over the one
+	 * the rest of the run is watching. Puts the file and the set of open schematics back afterwards.
+	 */
+	private static void runReplaceScreenTests(Minecraft mc) {
+		SchematicaState state = Schematica.STATE;
+		if (state.getActive().schematic == null || mc.world == null) {
+			Log.info("SMOKETEST: no schematic loaded, skipping the replace screen checks");
+			return;
+		}
+
+		Log.info("SMOKETEST: --- replace screen ---");
+		Screen before = mc.currentScreen;
+		int savedActive = state.getActiveIndex();
+		File file = new File(state.getSchematicDirectory(), REPLACE_FILE);
+
+		int[][][] blocks = new int[3][1][1];
+		int[][][] metadata = new int[3][1][1];
+		blocks[0][0][0] = COBBLESTONE;
+		blocks[1][0][0] = COBBLESTONE;
+		blocks[2][0][0] = WOOD_STAIRS;
+		metadata[2][0][0] = 2;
+		try {
+			SchematicFormat.write(file, new Schematic(blocks, metadata, new ArrayList<>(), 3, 1, 1));
+		} catch (IOException exception) {
+			fail("could not write the schematic to replace blocks in", exception);
+			return;
+		}
+
+		if (!state.openSchematic(file)) {
+			fail("openSchematic returned false for the replace test schematic", null);
+			return;
+		}
+
+		OpenSchematic target = state.getActive();
+		BlockReplaceScreen screen = new BlockReplaceScreen(null, target);
+		mc.setScreen(screen);
+		check("the screen lists what the schematic is made of", rowCount(screen), 2);
+		checkTrue("nothing is changed yet", !target.isEdited());
+
+		// A row is the block; the button on the end of it is what asks to change it.
+		clickRow(screen, 0);
+		checkTrue("clicking a row away from its button does nothing", mc.currentScreen == screen);
+
+		setMouseX(screen, replaceButtonX(screen));
+		clickRow(screen, 0);
+		checkTrue("clicking the button asks what to put there instead",
+				mc.currentScreen instanceof BlockChoiceScreen);
+
+		Screen choices = mc.currentScreen;
+		checkTrue("with something to choose from", rowCount(choices) > 0);
+
+		// The list is in block id order, so the first thing a full cube may become is stone.
+		clickRow(choices, 0);
+		checkTrue("picking one goes back to the list", mc.currentScreen == screen);
+
+		Schematic loaded = target.schematic.getSchematic();
+		check("the schematic is made of it now", loaded.getBlockId(0, 0, 0), STONE);
+		check("all of it", loaded.getBlockId(1, 0, 0), STONE);
+		check("with the stairs left alone", loaded.getBlockId(2, 0, 0), WOOD_STAIRS);
+		check("still facing the way they did", loaded.getMetadata(2, 0, 0), 2);
+		checkTrue("the overlay is marked for a rebuild", target.needsUpdate);
+		checkTrue("and the schematic as changed", target.isEdited());
+		check("what it is made of is counted again", rowCount(screen), 2);
+
+		// Save is the first button on the screen, and the only one that reaches the disk.
+		clickButton(screen, buttonAt(screen, 0));
+		checkTrue("saving clears the change", !target.isEdited());
+
+		try {
+			Schematic fromDisk = SchematicFormat.read(file).schematic;
+			check("the file holds the block that was put there", fromDisk.getBlockId(0, 0, 0), STONE);
+			check("and the stair it was not asked about", fromDisk.getBlockId(2, 0, 0), WOOD_STAIRS);
+			check("facing the way it did", fromDisk.getMetadata(2, 0, 0), 2);
+		} catch (IOException exception) {
+			fail("could not read the saved schematic back", exception);
+		}
+
+		// A schematic that has been turned is saved the way it is standing, and is not a turned copy
+		// of the file afterwards - or the note this world keeps would turn it again on the way in.
+		target.rotateSchematic();
+		check("a turned schematic counts its turn", target.getTurns(), 1);
+		checkTrue("and saves", target.save());
+		check("after which there is no turn left to apply", target.getTurns(), 0);
+		try {
+			Schematic turned = SchematicFormat.read(file).schematic;
+			check("because the file is the shape it was turned into", turned.getWidth(), 1);
+			check("in both axes", turned.getLength(), 3);
+		} catch (IOException exception) {
+			fail("could not read the turned schematic back", exception);
+		}
+
+		state.closeActive();
+		state.setActiveIndex(savedActive);
+		if (file.exists() && !file.delete()) {
+			Log.warn("SMOKETEST: could not delete " + file.getName());
+		}
+		mc.setScreen(before);
+		Log.info("SMOKETEST: --- replace screen done ---");
+	}
+
+	/**
+	 * The middle of the Replace button on a row.
+	 *
+	 * <p>Worked out here from the same two numbers the screen lays it out with: a row starts 108
+	 * left of the middle of the screen and its button 156 into the row. A test that clicked the row
+	 * without saying where would be testing nothing - where in a row a click lands is the whole of
+	 * what that row does with it.
+	 */
+	private static int replaceButtonX(Screen screen) {
+		return screen.width / 2 - 108 + 156 + 4;
+	}
+
+	/** How many rows a block list screen is showing. */
+	private static int rowCount(Screen screen) {
+		try {
+			java.lang.reflect.Method method = screen.getClass().getDeclaredMethod("rowCount");
+			method.setAccessible(true);
+			return (Integer) method.invoke(screen);
+		} catch (ReflectiveOperationException | RuntimeException exception) {
+			fail("could not count the rows on " + screen.getClass().getSimpleName(), exception);
+			return -1;
+		}
+	}
+
+	private static void clickRow(Screen screen, int index) {
+		try {
+			java.lang.reflect.Method method = screen.getClass().getDeclaredMethod("rowClicked", int.class);
+			method.setAccessible(true);
+			method.invoke(screen, index);
+		} catch (ReflectiveOperationException | RuntimeException exception) {
+			fail("could not click row " + index + " on " + screen.getClass().getSimpleName(), exception);
+		}
+	}
+
+	/** Where the mouse is, which a row is drawn and clicked against. */
+	private static void setMouseX(Screen screen, int mouseX) {
+		try {
+			java.lang.reflect.Field field = BlockListScreen.class.getDeclaredField("mouseX");
+			field.setAccessible(true);
+			field.setInt(screen, mouseX);
+		} catch (ReflectiveOperationException | RuntimeException exception) {
+			fail("could not put the mouse over a row's button", exception);
+		}
+	}
+
+	/**
+	 * One schematic with the replace screen over it: every kind of block in it, how much of each,
+	 * and a button on the end of each row.
+	 */
+	private static void setUpReplaceScene(Minecraft mc) {
+		SchematicaState state = Schematica.STATE;
+		if (mc.world == null) {
+			Log.info("SMOKETEST: no world, skipping the replace scene");
+			return;
+		}
+
+		state.closeAll();
+		File file = new File(state.getSchematicDirectory(), "smoketest.schematic");
+		if (!state.openSchematic(file)) {
+			fail("openSchematic returned false setting up the replace scene", null);
+			return;
+		}
+
+		state.getActive().offset.set(baseX, baseY, baseZ + STRUCTURE_SIZE + 2);
+		state.getActive().isRenderingSchematic = true;
+		state.getActive().needsUpdate = true;
+		parkCamera(mc);
+
+		mc.setScreen(new BlockReplaceScreen(null, state.getActive()));
+		Log.info("SMOKETEST: scene " + scene + " - the replace screen");
+	}
+
+	/**
+	 * The second half of it: everything one of those blocks could be swapped for.
+	 *
+	 * <p>The list a full cube gets is the long one - every other full cube in the game, every colour
+	 * of wool and every kind of wood among them - so this is also the shot that shows the list
+	 * scrolling and the icons drawn down the side of it.
+	 */
+	private static void setUpChoiceScene(Minecraft mc) {
+		OpenSchematic target = Schematica.STATE.getActive();
+		if (target.isEmpty()) {
+			Log.info("SMOKETEST: no schematic open, skipping the choice scene");
+			return;
+		}
+
+		BlockPalette palette = BlockPalette.of(target.schematic.getSchematic());
+		for (BlockPalette.Entry entry : palette.getEntries()) {
+			if (entry.hasReplacements()) {
+				mc.setScreen(new BlockChoiceScreen(new BlockReplaceScreen(null, target), entry));
+				Log.info("SMOKETEST: scene " + scene + " - what a " + entry.getName() + " could be, "
+						+ entry.getReplacements().size() + " of them");
+				return;
+			}
+		}
+
+		Log.info("SMOKETEST: nothing in the schematic can be replaced, skipping the choice scene");
 	}
 }

@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Map;
 
 import lunatrius.schematica.schematic.Schematic;
-import lunatrius.schematica.util.Translations;
+import lunatrius.schematica.util.ItemNames;
 import net.minecraft.Item;
 import net.minecraft.item.ItemStack;
 
@@ -59,25 +59,7 @@ public final class MaterialList {
 			this.itemId = itemId;
 			this.metadata = metadata;
 			this.matchDamage = matchDamage;
-			this.stack = displayStack(itemId, damage);
-		}
-
-		/**
-		 * The stack a row is drawn from. A schematic written by a later version can carry metadata
-		 * this one never made - a slab laid upside down, say - and the game's own name and icon
-		 * tables are sized for the metadata it did, so the stack is tried before it is kept and the
-		 * plain item used where it does not hold up. A row that reads a little vaguely is a better
-		 * answer than a list that cannot be opened.
-		 */
-		private static ItemStack displayStack(int itemId, int damage) {
-			ItemStack stack = new ItemStack(itemId, 1, Math.max(damage, 0));
-			try {
-				stack.getTranslationKey();
-				stack.method_725();
-				return stack;
-			} catch (RuntimeException exception) {
-				return new ItemStack(itemId, 1, 0);
-			}
+			this.stack = ItemNames.stack(itemId, damage);
 		}
 
 		public ItemStack getStack() {
@@ -100,22 +82,9 @@ public final class MaterialList {
 		/** The name the game itself gives this stack, so a wool row says which colour it is. */
 		public String getName() {
 			if (this.name == null) {
-				this.name = lookUpName(this.stack);
+				this.name = ItemNames.of(this.stack);
 			}
 			return this.name;
-		}
-
-		private static String lookUpName(ItemStack stack) {
-			String key = stack.getTranslationKey() + ".name";
-			String name = Translations.get(key);
-			if (!name.equals(key)) {
-				return name;
-			}
-
-			// Nothing in the language file for it. The bare key is no use to anyone, but the part of
-			// it that names the block still is.
-			int dot = key.lastIndexOf('.', key.length() - ".name".length() - 1);
-			return dot < 0 ? key : key.substring(dot + 1, key.length() - ".name".length());
 		}
 
 		private boolean accepts(ItemStack stack) {

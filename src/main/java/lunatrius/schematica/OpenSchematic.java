@@ -72,6 +72,13 @@ public class OpenSchematic {
 	/** The schematic {@link #materials} was counted from, so a different one is noticed. */
 	private Schematic materialsCountedFrom = null;
 
+	/**
+	 * Whether blocks have been swapped in it since it came off disk, so that what is being drawn is
+	 * no longer what the file says. Cleared by {@link #save()}, which is what makes the two agree
+	 * again.
+	 */
+	private boolean edited = false;
+
 	/** What the world last read as under each region of this schematic. */
 	private int[] watched = null;
 	private int watchOriginX;
@@ -103,6 +110,7 @@ public class OpenSchematic {
 			this.loadedName = file.getName();
 			this.turns = 0;
 			this.mirrored = false;
+			this.edited = false;
 			this.isRenderingSchematic = true;
 			this.needsUpdate = true;
 			this.watched = null;
@@ -128,6 +136,7 @@ public class OpenSchematic {
 		this.loadedName = null;
 		this.turns = 0;
 		this.mirrored = false;
+		this.edited = false;
 		this.blockRenderer = null;
 		this.isRenderingSchematic = false;
 		this.renderingLayer = -1;
@@ -170,6 +179,55 @@ public class OpenSchematic {
 	private void invalidateMaterials() {
 		this.materials = null;
 		this.materialsCountedFrom = null;
+	}
+
+	// --- editing -----------------------------------------------------------------------------
+
+	/** Whether its blocks have been changed since it was loaded, and not yet written back. */
+	public boolean isEdited() {
+		return this.edited;
+	}
+
+	/**
+	 * Called once blocks in it have been swapped for others.
+	 *
+	 * <p>Everything drawn for it is thrown away rather than picked over: a replacement can reach
+	 * every region of a schematic at once - that is rather the point of it - so there is nothing to
+	 * be saved by working out which ones it reached.
+	 */
+	public void onBlocksReplaced() {
+		this.needsUpdate = true;
+		this.edited = true;
+		this.invalidateMaterials();
+	}
+
+	/**
+	 * Writes it back over the file it came from.
+	 *
+	 * <p>What is saved is what is on the screen, turns and all, and afterwards the schematic is not
+	 * a turned copy of the file any more - it is the file. Saying otherwise would leave the note
+	 * this world keeps holding a rotation that has already been applied, and turn the build again on
+	 * the way back in.
+	 */
+	public boolean save() {
+		if (this.schematic == null || this.loadedName == null) {
+			return false;
+		}
+
+		File file = new File(Schematica.getSchematicDirectory(), this.loadedName);
+		try {
+			SchematicFormat.write(file, this.schematic.getSchematic());
+		} catch (IOException | RuntimeException exception) {
+			Log.error("Failed to save schematic " + this.loadedName, exception);
+			return false;
+		}
+
+		this.turns = 0;
+		this.mirrored = false;
+		this.edited = false;
+		Log.info("Saved " + this.loadedName + " (" + this.getWidth() + "x" + this.getHeight()
+				+ "x" + this.getLength() + ")");
+		return true;
 	}
 
 	// --- placement ---------------------------------------------------------------------------

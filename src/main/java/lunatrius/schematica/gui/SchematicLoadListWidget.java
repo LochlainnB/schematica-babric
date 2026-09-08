@@ -9,7 +9,7 @@ import net.minecraft.client.gui.widget.EntryListWidget;
 import net.minecraft.client.render.Tessellator;
 import org.lwjgl.opengl.GL11;
 
-/** The scrolling file list inside {@link SchematicLoadScreen}. */
+/** The scrolling file list inside {@link SchematicLoadScreen}, ending above its two rows of buttons. */
 class SchematicLoadListWidget extends EntryListWidget {
 	private static final int ENTRY_HEIGHT = 36;
 	private static final int ICON_SIZE = 32;
@@ -19,7 +19,7 @@ class SchematicLoadListWidget extends EntryListWidget {
 	private final SchematicLoadScreen parent;
 
 	SchematicLoadListWidget(SchematicLoadScreen parent) {
-		super(Schematica.getMinecraft(), parent.width, parent.height, 32, parent.height - 55 + 4, ENTRY_HEIGHT);
+		super(Schematica.getMinecraft(), parent.width, parent.height, 32, parent.height - 79 + 4, ENTRY_HEIGHT);
 		this.parent = parent;
 	}
 

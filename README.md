@@ -7,8 +7,9 @@ A port of Lunatrius' Schematica 1.2.0.10 for Minecraft Beta 1.7.3 from Risugami'
 Load an MCEdit `.schematic` file and it is drawn over the world as a ghost you can build against,
 with colour-coded boxes showing what is missing or wrong. You can also select a region of the world
 and save it back out as a schematic. A material list says what the whole thing will take and counts
-down as you gather it, on a screen or in the corner of the screen while you build. In a creative
-single player world, one button builds the whole thing where it stands. Several schematics can be
+down as you gather it, on a screen or in the corner of the screen while you build. Any block in a
+schematic can be swapped for another that leaves the build standing, keeping which way it faces. In
+a creative single player world, one button builds the whole thing where it stands. Several can be
 open at once, each standing in its own place. What you had open is still open when you next log in,
 in the place you left it, for each world and server separately.
 
@@ -164,6 +165,75 @@ of dropping under it. A row only ever leaves this list by being finished.
 The HUD shows as many rows as fit in half the screen, up to ten, with a count of what did not fit
 underneath. It sits in the very corner when it is narrow enough to stay clear of the hotbar and
 above the hearts when it is not, and F1 hides it along with the rest of the interface.
+
+### Replacing blocks
+
+**Replace Blocks** lists every kind of block the schematic is made of, with a **Replace** button on
+each row. Press one and the next screen is everything that block could be instead; pick one of those
+and every block of that kind becomes it, at once. The button is on the move screen, where it works
+on the schematic the picker is pointed at, and on the load screen, where it works on the file
+highlighted in the list - opening that file first if it is not open already.
+
+The rows are not the material list's. That one counts the items you would go and fetch, so a door is
+one door rather than its two halves and a pool of water is a bucket; this one counts what is in the
+file, because a block has to be named as the block it is before it can be swapped for another. Red
+wool and white wool are two rows, as they are in both lists. Stairs facing four different ways are
+one row, since which way a stair turns is not what a stair is.
+
+#### What can stand in for what
+
+A schematic is a shape, and most of what makes it that shape is in the metadata: which way a stair
+turns, which wall a torch hangs on, which half of a door this is. So every block belongs to a
+family, and a swap only ever happens inside one - full cubes for full cubes, stairs for stairs,
+slabs for slabs, torches for torches, rails for rails, doors for doors, plants for plants, pressure
+plates for pressure plates. A family is not "looks similar": it is a promise that the metadata means
+the same thing to everything in it, which is what lets the old value simply be carried over.
+Cobblestone stairs put where wooden stairs were face the way the wooden ones did, each of them its
+own way, and a torch that hung on the east wall still hangs on the east wall once it is a redstone
+torch.
+
+Glass and ice are in with stone and cobblestone, being the same shape - what the light does
+afterwards is usually the point of making the swap. Sand and gravel are there too, and will fall
+when the build goes up exactly as they would have if you had drawn them there in the first place.
+The families are about a block's own shape and nothing else: replacing what a torch is hanging on
+does not ask whether a torch will still hang on it.
+
+Where the new block has no use for part of the old value it is dropped rather than carried - red
+wool becoming stone is stone, not stone with a colour in it - and where the old block has nothing to
+give, the new one gets its own default. Leaves are the case that keeps something invisible: the flag
+that stops them rotting away survives becoming another kind of leaf.
+
+Some swaps are refused rather than fudged. A rail with a bend in it cannot become a powered rail,
+because a powered rail has no bend to be, and quietly straightening the track would be a worse
+answer than not offering the swap. That is decided against the metadata your schematic is actually
+holding, so a line of straight rails is offered the powered rail that a line with a corner in it is
+not.
+
+Blocks that carry a block entity - chests, furnaces, dispensers, signs, note blocks, jukeboxes,
+spawners - are in no family at all, in either direction: the entity would be left behind at a
+position that is no longer its block, a chest's contents hanging inside a wall of stone. They are
+still listed, with the button greyed out. So are the blocks nobody places - water, fire, portals,
+piston heads - for the same reason they have no material list row.
+
+Two blocks that are one block in two states - redstone ore lit and unlit, a redstone torch on and
+off - can be replaced but are never offered as the replacement. Both halves carry the same name, and
+a list with two identical rows in it is one you cannot choose from.
+
+#### Saving
+
+Replacing changes the schematic that is open, and the overlay redraws with it: the wall you are
+stood in front of is cobblestone the moment you pick cobblestone. The file is untouched until **Save
+to file**, which writes it back over the one it came from. That is deliberate - trying a colour
+against a build in the world is the point, and most of what gets tried is not kept - but it does
+mean an unsaved change is gone when the game closes, since a schematic comes back from its file and
+not from the note. The line under the list says which of the two you are looking at. There is no
+undo: the way back from a colour that looked better in the list is to pick the old one again, or to
+leave without saving.
+
+A schematic that has been rotated or mirrored saves the way it is standing and stops counting the
+turn afterwards. The file is now what is on the screen, and saying otherwise would leave the note
+this world keeps holding a rotation that has already been applied, and turn the build again on the
+way back in.
 
 ### Easy place
 
@@ -421,6 +491,7 @@ schematic/   Schematic          the data model: block ids, metadata, block entit
              SchematicFormat    MCEdit .schematic (gzipped NBT) reader and writer
              SchematicWorld     adapts a Schematic to a World so vanilla renderers can draw it
              BlockTransform     metadata fix-ups for rotate and mirror
+             BlockSwap          which blocks can stand in for which, and what a swap does to metadata
 render/      SchematicRenderer   the region cache: ghost blocks and comparison boxes
              Frustum             the view planes, read back out of the matrix stack
              SignRenderer        signs, drawn with the ghost alpha instead of vanilla's opaque text
@@ -432,6 +503,9 @@ gui/         AxisScreen          routes clicks, keys and the tab order to the fo
              MaterialListWidget    one row of it: the icon, the name and the two counts
              InfoHud               the same list in the corner of the screen, while playing
              SchematicPickerWidget which of the open schematics the move screen is pointed at
+             BlockListScreen       what the two screens below share: rows, icons and the scrolling
+             BlockReplaceScreen    every kind of block in the schematic, each with a Replace button
+             BlockChoiceScreen     what one of them could be swapped for
              four more Screens and a slider widget
 compat/      ModMenuIntegration  optional, loaded only when Mod Menu asks for it
              CreativeMode        optional, asks BHCreative whether the player is in creative mode
@@ -444,6 +518,7 @@ HotbarRestock      brings a block onto the hotbar, and waits for the server to a
 Sightline          walks the blocks along the line of sight, nearest first
 SchematicPaste     writing a schematic into the world at once, and who is allowed to
 MaterialList       what a schematic is built out of, counted against an inventory
+BlockPalette       what it is made of block by block, and the swapping of one of them for another
 SchematicMemory    what was open in each world, kept between sessions
 BlockItems         which item puts a block down, and what you would go and fetch for it
 ```
@@ -492,6 +567,10 @@ Behaviour is otherwise the same as 1.2.0.10; these are deliberate changes:
   first, so working on a build made of two files meant swapping between them and putting each one
   back by hand every time. Up to eight are open here, all drawn, each in its own place and sliced to
   its own course, with a picker on the move screen choosing which one the controls are pointed at.
+- **Blocks can be swapped for other blocks.** The original could move a schematic and nothing else,
+  so changing what a build was made of meant editing the file in something that was not the game and
+  loading it again. Any block in one can be swapped here for anything that would leave the build
+  standing - the stairs keep facing the way they faced - and written back over the file.
 - **What was open is remembered per world.** The original loaded nothing on its own: every session
   started empty, and putting a schematic back where it had been was done by hand from the numbers
   you had written down. This writes the note itself, one per save folder, server address and
@@ -608,6 +687,35 @@ back to the single empty slot a session starts with - which is the state the res
 so the check and the tidying up are the same thing. Scene 16 is a screenshot of the move screen with
 two open and the picker dropped over it, since whether the list draws over the buttons it covers or
 under them is not something a check can say.
+
+Replacing blocks is checked on a schematic written for the checking, since the cases that matter are
+the awkward blocks and a structure holding all of them is easier to write down than to build. The
+palette is asked to have a row per kind of block, to count each of them, to put two colours of one
+block in two rows and one block facing two ways in one, and to have no row at all for air. Then each
+family is asked what it will and will not offer: a full cube offered another full cube, one the
+light comes through and one of a colour, and refused a stair, a chest and itself; stairs offered
+nothing but the other stairs and a door nothing but the other door; a torch offered the redstone
+torch and not the unlit one that shares its name; a chest offered nothing whatever. The rail is the
+one that has to be asked twice - a schematic with a bend in it is refused the powered rail, and one
+of nothing but straight and sloped rails is offered it, which is the whole of what deciding against
+the metadata a schematic is holding comes to. Then the metadata carried across a swap is checked one
+case at a time: the way a stair faces and that it is still upside down, the wall a torch hangs on, a
+door's half and its hinge, a slab still laid upside down, the flag on a leaf, the current dropped
+from a powered rail becoming a plain one, and a colour dropped going one way and given going the
+other. Last the swap is applied to the schematic and the blocks read back - two stairs each still
+facing their own way, the cobblestone beside them untouched, and one colour of wool changed with the
+other left as it was.
+
+The two screens are driven the way a player drives them, on a schematic and a file of their own so
+that saving cannot write over the one the rest of the run is watching. A click on a row away from
+its button does nothing, a click on the button opens the list of what could go there instead, and a
+click on a row of that list swaps the blocks, marks the overlay for a rebuild, marks the schematic
+as changed, and comes back to a list counted again. Save is checked to clear the change, and the
+file read back off disk to hold the block that was put there and the stair it was not asked about,
+still facing the way it did. Then the schematic is turned and saved again, and the file has to come
+back the shape it was turned into with no turn left to apply - which is what stops the note this
+world keeps from turning it a second time. Scene 17 is the replace screen and scene 18 the list of
+what a block of gold could be, sixty rows and the only shot of one of these lists scrolling.
 
 Remembering what was open is checked from both ends. The name the mod gave the test world on its own
 is asserted to be the folder that world was started from, and on a server the address the connect

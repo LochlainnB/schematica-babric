@@ -74,6 +74,7 @@ public class SchematicControlScreen extends AxisScreen {
 	private ButtonWidget btnRotate;
 	private ButtonWidget btnEasyPlace;
 	private ButtonWidget btnPaste;
+	private ButtonWidget btnReplace;
 	private ButtonWidget btnMaterials;
 	private ButtonWidget btnSettings;
 
@@ -117,6 +118,10 @@ public class SchematicControlScreen extends AxisScreen {
 		this.btnMirror = this.addButton(id++, this.width - 90, this.height - 55, 80, 20, Translations.get("schematic.flip"));
 		this.btnRotate = this.addButton(id++, this.width - 90, this.height - 30, 80, 20, Translations.get("schematic.rotate"));
 
+		// Changing what the schematic is made of, rather than where it stands - the one thing on this
+		// screen that is about the file and not about the ghost.
+		this.btnReplace = this.addButton(id++, 10, this.height - 130, 100, 20, Translations.get("schematic.replace"));
+
 		// Building the thing rather than a guide to it, which only a creative single player world can
 		// be allowed. Greyed out the rest of the time, with a tooltip saying which of the reasons it
 		// is - a button that is simply dead says nothing about what would bring it back.
@@ -139,6 +144,7 @@ public class SchematicControlScreen extends AxisScreen {
 		this.btnMirror.active = hasSchematic;
 		this.btnRotate.active = hasSchematic;
 		this.btnMaterials.active = hasSchematic;
+		this.btnReplace.active = hasSchematic;
 		// Paste, Open and Close are left to render(), which settles them every frame: what they turn
 		// on is a creative mode and a set of open schematics this screen does not own and cannot hear
 		// about, so asking once on the way in would leave a button that is wrong until the screen is
@@ -182,6 +188,8 @@ public class SchematicControlScreen extends AxisScreen {
 			active.rotateSchematic();
 		} else if (button == this.btnPaste) {
 			this.paste();
+		} else if (button == this.btnReplace) {
+			this.minecraft.setScreen(new BlockReplaceScreen(this, active));
 		} else if (button == this.btnMaterials) {
 			this.minecraft.setScreen(new MaterialListScreen(this));
 		} else if (button == this.btnEasyPlace) {
