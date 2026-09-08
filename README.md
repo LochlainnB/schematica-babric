@@ -235,6 +235,26 @@ turn afterwards. The file is now what is on the screen, and saying otherwise wou
 this world keeps holding a rotation that has already been applied, and turn the build again on the
 way back in.
 
+### Deleting a schematic
+
+**Delete** on the load screen takes the highlighted file away, on the second press rather than the
+first. The first press turns the button into a warning and names the file under the list, and
+pressing it again is the answer - there is no dialogue to click through and nothing to type. Choosing
+another file is as good an answer as walking away, since the question was about the file that was
+highlighted when it was asked, and so is leaving it alone for five seconds. A press landing within
+half a second of the first is ignored: the second half of a double click cannot be an answer to a
+question that was not on the screen when the first half was pressed.
+
+Where the platform keeps deleted files somewhere, that is where the file goes - a schematic is hours
+of somebody's building, and this is the one button in the mod that ends one. Where it does not, the
+file is deleted outright. The log says which of the two happened.
+
+A schematic that is already open stays open. The blocks are in memory and the ghost is standing in
+the world, and deleting the file they came from is not an instruction to take the build off the
+screen. It does mean nothing will bring it back next session, since what this world remembers is a
+file name and there is no longer a file - and that **Save to file** on the replace screen would
+write it back out again, which is the only way there is to undo this.
+
 ### Easy place
 
 With easy place on, a right click can only ever put down the block the schematic wants at the
@@ -563,6 +583,9 @@ Behaviour is otherwise the same as 1.2.0.10; these are deliberate changes:
 - **A material list.** The original drew a schematic and left working out what it would take to
   build entirely to you. This counts it, in the items you would go and fetch, and counts your
   inventory against it - on a screen, or in a HUD in the corner listing only what is still short.
+- **Schematics can be deleted from the game.** The original could only ever add to the folder, so
+  tidying one up meant leaving the game and finding it on disk. **Delete** on the load screen takes
+  the highlighted file away on a second press, into the platform's wastebasket where there is one.
 - **Several schematics can be open at once.** The original held one: loading a second closed the
   first, so working on a build made of two files meant swapping between them and putting each one
   back by hand every time. Up to eight are open here, all drawn, each in its own place and sliced to
@@ -716,6 +739,13 @@ still facing the way it did. Then the schematic is turned and saved again, and t
 back the shape it was turned into with no turn left to apply - which is what stops the note this
 world keeps from turning it a second time. Scene 17 is the replace screen and scene 18 the list of
 what a block of gold could be, sixty rows and the only shot of one of these lists scrolling.
+
+Deleting is checked on a file written to be deleted, and mostly by what does not happen to it: it is
+still there after one press, after a press landing too soon after that one to be an answer to it,
+after the warning has been walked away from by highlighting something else, and after it has been
+left alone long enough to expire. Only two presses that were meant take it, after which the list is
+checked to have been taken again without it and nothing to be left highlighted. Scene 19 is the
+screen with a warning up, which is the only shot there is of one.
 
 Remembering what was open is checked from both ends. The name the mod gave the test world on its own
 is asserted to be the folder that world was started from, and on a server the address the connect

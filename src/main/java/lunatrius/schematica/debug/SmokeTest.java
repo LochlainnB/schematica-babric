@@ -172,6 +172,12 @@ public final class SmokeTest {
 	private static final int RAIL_POWERED_NS = 10;
 	/** Its own file, so that saving over it cannot touch the one the rest of the run uses. */
 	private static final String REPLACE_FILE = "smoketest-replace.schematic";
+	/** And another, since the whole of what the delete tests do to a file is take it away. */
+	private static final String DELETE_FILE = "smoketest-delete.schematic";
+	/** Long enough to outlast a delete warning, which the load screen keeps for a hundred ticks. */
+	private static final int DELETE_TIMEOUT_TICKS = 101;
+	/** And long enough to be past the moment a fresh one refuses to be answered in. */
+	private static final int DELETE_DELAY_TICKS = 12;
 
 	/** Nine blocks to fill the bar plus the gold, which is what the server is asked to hand out. */
 	private static final int TEST_STACKS = 10;
@@ -2133,6 +2139,7 @@ public final class SmokeTest {
 				runInfoHudScreenTests(mc);
 				runMultipleSchematicTests(mc);
 				runReplaceScreenTests(mc);
+				runDeleteTests(mc);
 				state.rotateSchematic();
 				Log.info("SMOKETEST: scene 1 - rotated");
 				return;
@@ -2213,6 +2220,9 @@ public final class SmokeTest {
 				return;
 			case 17:
 				setUpChoiceScene(mc);
+				return;
+			case 18:
+				setUpDeleteScene(mc);
 				return;
 			default:
 				mc.setScreen(null);
@@ -4243,5 +4253,137 @@ public final class SmokeTest {
 		}
 
 		Log.info("SMOKETEST: nothing in the schematic can be replaced, skipping the choice scene");
+	}
+
+	/**
+	 * Deleting a schematic, which is the one thing in the mod that takes a file away - so most of
+	 * what is checked here is what it does not do.
+	 *
+	 * <p>The button is pressed the way a player presses it, on a file written for the purpose, and
+	 * the file itself is the assertion: still there after one press, still there after a press too
+	 * soon after that one, still there after the warning has been walked away from and after it has
+	 * been left long enough to expire, and gone only after two presses that were meant.
+	 */
+	private static void runDeleteTests(Minecraft mc) {
+		Log.info("SMOKETEST: --- delete ---");
+		SchematicaState state = Schematica.STATE;
+		Screen before = mc.currentScreen;
+		int savedSelection = state.selectedSchematic;
+
+		File file = new File(state.getSchematicDirectory(), DELETE_FILE);
+		int[][][] blocks = new int[1][1][1];
+		blocks[0][0][0] = COBBLESTONE;
+		try {
+			SchematicFormat.write(file, new Schematic(blocks, new int[1][1][1], new ArrayList<>(), 1, 1, 1));
+		} catch (IOException exception) {
+			fail("could not write the schematic to delete", exception);
+			return;
+		}
+
+		SchematicLoadScreen screen = new SchematicLoadScreen(null);
+		mc.setScreen(screen);
+		int index = entryIndex(screen, DELETE_FILE);
+		if (index < 0) {
+			fail("the file to delete is not in the load screen's list", null);
+			mc.setScreen(before);
+			return;
+		}
+
+		state.selectedSchematic = index;
+		ButtonWidget delete = buttonAt(screen, 0);
+		checkText("the button is an ordinary one to start with",
+				delete.text, Translations.get("schematic.delete"));
+
+		clickButton(screen, delete);
+		checkText("one press asks rather than deletes",
+				delete.text, Translations.get("schematic.delete.confirm"));
+		checkTrue("and the file is still there", file.exists());
+
+		// The second half of a double click, landing while the warning is still going up.
+		clickButton(screen, delete);
+		checkTrue("a press too soon after it is not an answer to it", file.exists());
+
+		// Highlighting something else is as good an answer as walking away, so the warning goes.
+		state.selectedSchematic = 0;
+		screen.tick();
+		checkText("choosing something else puts the button back",
+				delete.text, Translations.get("schematic.delete"));
+		state.selectedSchematic = index;
+
+		// And a warning nobody came back to expires on its own.
+		clickButton(screen, delete);
+		tickScreen(screen, DELETE_TIMEOUT_TICKS);
+		checkText("a warning left alone goes away", delete.text, Translations.get("schematic.delete"));
+		checkTrue("with the file still there", file.exists());
+
+		clickButton(screen, delete);
+		tickScreen(screen, DELETE_DELAY_TICKS);
+		clickButton(screen, delete);
+		checkTrue("two presses that were meant delete the file", !file.exists());
+		checkText("after which the button is an ordinary one again",
+				delete.text, Translations.get("schematic.delete"));
+		check("nothing is left highlighted, what was chosen being gone", state.selectedSchematic, 0);
+		check("and the list is taken again without it", entryIndex(screen, DELETE_FILE), -1);
+
+		if (file.exists() && !file.delete()) {
+			Log.warn("SMOKETEST: could not delete " + file.getName());
+		}
+		state.selectedSchematic = savedSelection;
+		mc.setScreen(before);
+		Log.info("SMOKETEST: --- delete done ---");
+	}
+
+	/** Where a file sits in the load screen's list, or -1 when it is not in it at all. */
+	private static int entryIndex(SchematicLoadScreen screen, String name) {
+		List<?> entries = loadEntries(screen);
+		for (int i = 0; i < entries.size(); i++) {
+			if (name.equals(entries.get(i))) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	/** Ticks a screen the way the game does between one click and the next. */
+	private static void tickScreen(Screen screen, int ticks) {
+		for (int i = 0; i < ticks; i++) {
+			screen.tick();
+		}
+	}
+
+	/**
+	 * The load screen with a delete armed: the button asking for a second press and the line under
+	 * the list naming the file that would go.
+	 *
+	 * <p>The one scene that shows a warning at all, and the only evidence there is that it is drawn
+	 * in a colour that reads as one. Nothing here presses it a second time, and the scene is shot
+	 * well inside the time the warning stands for.
+	 */
+	private static void setUpDeleteScene(Minecraft mc) {
+		SchematicLoadScreen screen = new SchematicLoadScreen(null);
+		mc.setScreen(screen);
+
+		if (loadEntries(screen).size() < 2) {
+			Log.info("SMOKETEST: nothing in the folder to arm a delete on, skipping the delete scene");
+			return;
+		}
+
+		// The first file in the list, which is the one row a shot is sure to show highlighted: the
+		// list opens at the top and does not scroll to whatever is picked.
+		Schematica.STATE.selectedSchematic = 1;
+		clickButton(screen, buttonAt(screen, 0));
+		Log.info("SMOKETEST: scene " + scene + " - the load screen with a delete armed");
+	}
+
+	/** The load screen's snapshot of the folder: the placeholder first, then the file names. */
+	private static List<?> loadEntries(SchematicLoadScreen screen) {
+		try {
+			java.lang.reflect.Method method = SchematicLoadScreen.class.getDeclaredMethod("getEntries");
+			method.setAccessible(true);
+			return (List<?>) method.invoke(screen);
+		} catch (ReflectiveOperationException | RuntimeException exception) {
+			fail("could not read the load screen's file list", exception);
+			return new ArrayList<>();
+		}
 	}
 }
