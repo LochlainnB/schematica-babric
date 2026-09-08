@@ -96,7 +96,7 @@ public class Schematica implements ClientModInitializer {
 
 		// The overlay is only as good as the world it was compared against, and a world does not
 		// always say when it changes underneath one.
-		STATE.pollWorldUnderSchematic();
+		STATE.pollWorldUnderSchematics();
 
 		if (lunatrius.schematica.debug.SmokeTest.isEnabled()) {
 			lunatrius.schematica.debug.SmokeTest.tick(mc);
@@ -132,17 +132,20 @@ public class Schematica implements ClientModInitializer {
 		} else if (control) {
 			mc.setScreen(new SchematicControlScreen());
 		} else if (toggle) {
-			// Nothing loaded means nothing to show, and toggleRendering already refuses that.
-			STATE.toggleRendering();
+			// Every open schematic at once, rather than the one the move screen is pointed at: this
+			// is the key you reach for when the ghosts are in the way of what you have built, and
+			// half of them going is no use then. Nothing loaded means nothing to show, and
+			// toggleAllRendering already refuses that.
+			STATE.toggleAllRendering();
 		} else if (settings) {
 			// The same screen Mod Menu's Configure button opens, so the key works either way.
 			mc.setScreen(new SchematicaSettingsScreen(mc.currentScreen));
 		} else if (layerUp) {
 			// The same step the move screen's layer buttons take, so -1 (all layers) sits below layer 1
 			// from the keys as well.
-			STATE.setRenderingLayer(STATE.renderingLayer + 1);
+			STATE.setRenderingLayer(STATE.getActive().renderingLayer + 1);
 		} else if (layerDown) {
-			STATE.setRenderingLayer(STATE.renderingLayer - 1);
+			STATE.setRenderingLayer(STATE.getActive().renderingLayer - 1);
 		} else if (easyPlace) {
 			STATE.toggleEasyPlace();
 			// The one thing the mod says out loud. Every other key changes something you can see;

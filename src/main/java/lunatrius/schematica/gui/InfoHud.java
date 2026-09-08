@@ -101,7 +101,7 @@ public final class InfoHud extends DrawableHelper {
 		this.totalMissing = 0;
 
 		if (!Schematica.CONFIG.infoHud || mc == null || mc.player == null
-				|| Schematica.STATE.schematic == null) {
+				|| Schematica.STATE.getActive().isEmpty()) {
 			return;
 		}
 

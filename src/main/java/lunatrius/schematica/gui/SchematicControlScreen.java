@@ -1,6 +1,7 @@
 package lunatrius.schematica.gui;
 
 import lunatrius.schematica.EasyPlace;
+import lunatrius.schematica.OpenSchematic;
 import lunatrius.schematica.Schematica;
 import lunatrius.schematica.SchematicPaste;
 import lunatrius.schematica.SchematicaState;
@@ -8,10 +9,14 @@ import lunatrius.schematica.util.Translations;
 import net.minecraft.client.gui.widget.ButtonWidget;
 
 /**
- * Moves the loaded schematic around, steps through its layers and applies rotate / mirror.
+ * Moves a schematic around, steps through its layers and applies rotate / mirror.
  *
- * <p>Draws no background on purpose: the schematic stays visible behind the controls while it is
- * being positioned.
+ * <p>Everything here is pointed at one of the open schematics, and the picker along the top is what
+ * chooses which. The rest of the screen is built again whenever that changes, because the
+ * coordinate rows edit the offset of the schematic they were laid out against.
+ *
+ * <p>Draws no background on purpose: the schematics stay visible behind the controls while one of
+ * them is being positioned.
  */
 public class SchematicControlScreen extends AxisScreen {
 	private static final int FIELD_WIDTH = 44;
@@ -19,6 +24,13 @@ public class SchematicControlScreen extends AxisScreen {
 
 	/** Left edge of the layers / operations column on the right of the screen. */
 	private static final int RIGHT_COLUMN = 95;
+
+	/** The row along the top: which schematic, and the two ways to change what is open. */
+	private static final int PICKER_WIDTH = 130;
+	private static final int PICKER_Y = 8;
+	private static final int TOP_BUTTON_WIDTH = 42;
+	private static final int TOP_GAP = 4;
+	private static final int TOP_ROW_WIDTH = PICKER_WIDTH + (TOP_BUTTON_WIDTH + TOP_GAP) * 2;
 
 	/** The paste button, kept here because working out whether the mouse is over it needs them. */
 	private static final int PASTE_X = 10;
@@ -43,10 +55,17 @@ public class SchematicControlScreen extends AxisScreen {
 	private int blockCenterX;
 	private int centerY;
 
-	private final AxisControls axisX = new AxisControls(this.state.offset, AxisControls.X);
-	private final AxisControls axisY = new AxisControls(this.state.offset, AxisControls.Y);
-	private final AxisControls axisZ = new AxisControls(this.state.offset, AxisControls.Z);
+	/**
+	 * Built in {@link #init()} rather than held for the life of the screen: a row edits one number
+	 * inside one schematic's offset, so pointing the screen at another schematic means new rows.
+	 */
+	private AxisControls axisX;
+	private AxisControls axisY;
+	private AxisControls axisZ;
 
+	private SchematicPickerWidget picker;
+	private ButtonWidget btnOpen;
+	private ButtonWidget btnClose;
 	private ButtonWidget btnDecLayer;
 	private ButtonWidget btnIncLayer;
 	private ButtonWidget btnHide;
@@ -63,6 +82,8 @@ public class SchematicControlScreen extends AxisScreen {
 
 	@Override
 	public void init() {
+		OpenSchematic active = this.state.getActive();
+
 		int rowWidth = AxisControls.width(FIELD_WIDTH, BUTTON_WIDTH);
 		// Centred where there is room, pushed left when the operations column would be in the way -
 		// at the smallest gui scale the two do not both fit around the middle of the screen.
@@ -70,10 +91,24 @@ public class SchematicControlScreen extends AxisScreen {
 		this.blockCenterX = this.blockX + rowWidth / 2;
 		this.centerY = this.height / 2;
 
+		this.axisX = new AxisControls(active.offset, AxisControls.X);
+		this.axisY = new AxisControls(active.offset, AxisControls.Y);
+		this.axisZ = new AxisControls(active.offset, AxisControls.Z);
+
 		int id = 0;
 		id = this.addAxis(this.axisX, id, this.blockX, this.centerY - 30, FIELD_WIDTH, BUTTON_WIDTH);
 		id = this.addAxis(this.axisY, id, this.blockX, this.centerY - 5, FIELD_WIDTH, BUTTON_WIDTH);
 		id = this.addAxis(this.axisZ, id, this.blockX, this.centerY + 20, FIELD_WIDTH, BUTTON_WIDTH);
+
+		// Which schematic all of the above is about, with the two buttons that change the set itself
+		// on either side of it.
+		int pickerX = Math.max(2, this.width / 2 - TOP_ROW_WIDTH / 2);
+		this.picker = new SchematicPickerWidget(id++, pickerX, PICKER_Y, PICKER_WIDTH, this.state);
+		this.buttons.add(this.picker);
+		this.btnOpen = this.addButton(id++, pickerX + PICKER_WIDTH + TOP_GAP, PICKER_Y,
+				TOP_BUTTON_WIDTH, 20, Translations.get("schematic.open"));
+		this.btnClose = this.addButton(id++, pickerX + PICKER_WIDTH + TOP_BUTTON_WIDTH + TOP_GAP * 2, PICKER_Y,
+				TOP_BUTTON_WIDTH, 20, Translations.get("schematic.close"));
 
 		this.btnDecLayer = this.addButton(id++, this.width - 90, this.height - 150, 25, 20, Translations.get("schematic.decrease"));
 		this.btnIncLayer = this.addButton(id++, this.width - 35, this.height - 150, 25, 20, Translations.get("schematic.increase"));
@@ -97,20 +132,21 @@ public class SchematicControlScreen extends AxisScreen {
 		// The settings otherwise only open through Mod Menu, which is optional.
 		this.btnSettings = this.addButton(id, 10, this.height - 30, 80, 20, Translations.get("schematic.settings"));
 
-		boolean hasSchematic = this.state.schematic != null;
+		boolean hasSchematic = !active.isEmpty();
 		this.btnDecLayer.active = hasSchematic;
 		this.btnIncLayer.active = hasSchematic;
 		this.btnHide.active = hasSchematic;
 		this.btnMirror.active = hasSchematic;
 		this.btnRotate.active = hasSchematic;
 		this.btnMaterials.active = hasSchematic;
-		// Paste is left to render(), which settles it every frame: what it turns on is a creative
-		// mode this screen does not own and cannot hear about, so asking once on the way in would
-		// leave a button that is wrong until the screen is opened again.
+		// Paste, Open and Close are left to render(), which settles them every frame: what they turn
+		// on is a creative mode and a set of open schematics this screen does not own and cannot hear
+		// about, so asking once on the way in would leave a button that is wrong until the screen is
+		// opened again.
 	}
 
 	private String hideButtonLabel() {
-		return Translations.get(this.state.isRenderingSchematic ? "schematic.hide" : "schematic.show");
+		return Translations.get(this.state.getActive().isRenderingSchematic ? "schematic.hide" : "schematic.show");
 	}
 
 	@Override
@@ -123,19 +159,27 @@ public class SchematicControlScreen extends AxisScreen {
 			return;
 		}
 
-		if (button == this.btnDecLayer) {
-			this.state.setRenderingLayer(this.state.renderingLayer - 1);
+		OpenSchematic active = this.state.getActive();
+		if (button == this.picker) {
+			this.picker.toggle();
+		} else if (button == this.btnOpen) {
+			this.minecraft.setScreen(new SchematicLoadScreen(this));
+		} else if (button == this.btnClose) {
+			this.state.closeActive();
+			this.rebuild();
+		} else if (button == this.btnDecLayer) {
+			active.setRenderingLayer(active.renderingLayer - 1);
 		} else if (button == this.btnIncLayer) {
-			this.state.setRenderingLayer(this.state.renderingLayer + 1);
+			active.setRenderingLayer(active.renderingLayer + 1);
 		} else if (button == this.btnHide) {
-			this.state.toggleRendering();
+			active.toggleRendering();
 			this.btnHide.text = this.hideButtonLabel();
 		} else if (button == this.btnMove) {
 			this.state.moveHere();
 		} else if (button == this.btnMirror) {
-			this.state.mirrorSchematic();
+			active.mirrorSchematic();
 		} else if (button == this.btnRotate) {
-			this.state.rotateSchematic();
+			active.rotateSchematic();
 		} else if (button == this.btnPaste) {
 			this.paste();
 		} else if (button == this.btnMaterials) {
@@ -146,6 +190,49 @@ public class SchematicControlScreen extends AxisScreen {
 		} else if (button == this.btnSettings) {
 			this.minecraft.setScreen(new SchematicaSettingsScreen(this));
 		}
+	}
+
+	/**
+	 * Clicks are offered to the picker before the buttons: while it is dropped it lies over some of
+	 * them, and a click meant for the list would otherwise land on whatever is underneath.
+	 */
+	@Override
+	protected void mouseClicked(int mouseX, int mouseY, int button) {
+		if (this.picker != null && this.picker.isExpanded()) {
+			int row = this.picker.rowAt(mouseX, mouseY);
+			if (row >= 0) {
+				this.select(row);
+				return;
+			}
+			if (!this.picker.isOverButton(mouseX, mouseY)) {
+				// Anywhere else puts the list away, and does nothing else: the click that closes a
+				// dropped list belongs to the list.
+				this.picker.collapse();
+				return;
+			}
+		}
+
+		super.mouseClicked(mouseX, mouseY, button);
+	}
+
+	/** Points the screen at another of the open schematics. */
+	private void select(int index) {
+		this.picker.collapse();
+		if (index == this.state.getActiveIndex()) {
+			return;
+		}
+
+		this.state.setActiveIndex(index);
+		this.rebuild();
+	}
+
+	/**
+	 * Lays the screen out again against whatever is now the active schematic. The rows hold the
+	 * offset they were built with, so this is what makes them the new one's rows.
+	 */
+	private void rebuild() {
+		this.status = "";
+		this.init(this.minecraft, this.width, this.height);
 	}
 
 	/**
@@ -160,14 +247,22 @@ public class SchematicControlScreen extends AxisScreen {
 		}
 	}
 
-	/** The offset the rows edit is what the overlay is drawn against, so it has to be rebuilt. */
+	/** The offset the rows edit is what an overlay is drawn against, so it has to be rebuilt. */
 	@Override
 	protected void axisChanged() {
-		this.state.needsUpdate = true;
+		this.state.getActive().needsUpdate = true;
 	}
 
 	@Override
 	public void render(int mouseX, int mouseY, float delta) {
+		OpenSchematic active = this.state.getActive();
+
+		this.picker.updateLabel(this.textRenderer);
+		this.btnOpen.active = this.state.canOpenAnother();
+		// Closing the last empty slot would leave the controls pointing at nothing, and there is
+		// nothing in it to close.
+		this.btnClose.active = !active.isEmpty() || this.state.getOpenCount() > 1;
+
 		this.drawCenteredTextWithShadow(this.textRenderer, Translations.get("schematic.moveschematic"), this.blockCenterX, this.centerY - 45, 0xFFFFFF);
 		// The hint has said its piece once something has been pasted.
 		String footer = this.status.isEmpty() ? Translations.get("schematic.coords.hint") : this.status;
@@ -176,7 +271,7 @@ public class SchematicControlScreen extends AxisScreen {
 		this.drawCenteredTextWithShadow(this.textRenderer, Translations.get("schematic.operations"), this.width - 50, this.height - 120, 0xFFFFFF);
 		this.drawCenteredTextWithShadow(
 				this.textRenderer,
-				this.state.renderingLayer < 0 ? Translations.get("schematic.all") : Integer.toString(this.state.renderingLayer + 1),
+				active.renderingLayer < 0 ? Translations.get("schematic.all") : Integer.toString(active.renderingLayer + 1),
 				this.width - 50, this.height - 145, 0xFFFFFF);
 
 		this.renderAxes();
@@ -186,10 +281,11 @@ public class SchematicControlScreen extends AxisScreen {
 
 		super.render(mouseX, mouseY, delta);
 
-		// After the buttons, so it sits over the one it belongs to rather than under it.
+		// After the buttons, so each sits over the ones it belongs over rather than under them.
 		if (this.isOverPaste(mouseX, mouseY)) {
 			this.renderPasteTooltip(paste);
 		}
+		this.picker.renderList(this.minecraft, mouseX, mouseY);
 	}
 
 	/**

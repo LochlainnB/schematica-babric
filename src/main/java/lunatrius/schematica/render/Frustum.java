@@ -11,8 +11,10 @@ import org.lwjgl.opengl.GL11;
  *
  * <p>Taken from the matrices rather than from the game's own frustum so that it keeps working
  * whatever a renderer mod has done to the world pass, and so that it needs no camera state of its
- * own: {@link #update()} is called with the modelview already translated into the schematic's
- * coordinates, which is then the space the boxes handed to {@link #isBoxVisible} are in.
+ * own: {@link #update()} is called with the modelview already translated out of the camera's
+ * coordinates and into the world's, which is then the space the boxes handed to
+ * {@link #isBoxVisible} are in. One set of planes covers every open schematic that way, whatever
+ * corner of the world each of them is standing in.
  */
 final class Frustum {
 	private static final int RIGHT = 0;

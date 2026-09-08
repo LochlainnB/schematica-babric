@@ -84,7 +84,7 @@ public final class SchematicPaste {
 	 */
 	public static Availability availability(Minecraft mc) {
 		SchematicaState state = Schematica.STATE;
-		if (mc == null || state.schematic == null) {
+		if (mc == null || state.getActive().isEmpty()) {
 			// Covers having no world as well: a schematic can only be loaded into one, so with no
 			// world nothing is loaded either, and "nothing to paste" is the truer of the two answers.
 			return Availability.NO_SCHEMATIC;
@@ -130,15 +130,24 @@ public final class SchematicPaste {
 	 * @return how many blocks were written.
 	 */
 	public static int write(World world, SchematicaState state) {
-		if (world == null || state.schematic == null) {
+		return write(world, state.getActive());
+	}
+
+	/**
+	 * The same, pointed at one open schematic rather than at whichever is active. Several can be
+	 * open at once and only one of them is being pasted - the one the move screen's picker and its
+	 * Paste button are both pointed at.
+	 */
+	public static int write(World world, OpenSchematic open) {
+		if (world == null || open.schematic == null) {
 			return 0;
 		}
 
-		SchematicWorld ghost = state.schematic;
+		SchematicWorld ghost = open.schematic;
 		Schematic schematic = ghost.getSchematic();
-		int offsetX = state.offset.x;
-		int offsetY = state.offset.y;
-		int offsetZ = state.offset.z;
+		int offsetX = open.offset.x;
+		int offsetY = open.offset.y;
+		int offsetZ = open.offset.z;
 		int width = schematic.getWidth();
 		int height = schematic.getHeight();
 		int length = schematic.getLength();
@@ -180,14 +189,14 @@ public final class SchematicPaste {
 		// this every cell of it has changed.
 		world.method_202(offsetX, Math.max(0, offsetY), offsetZ,
 				offsetX + width - 1, Math.min(MAX_Y, offsetY + height - 1), offsetZ + length - 1);
-		state.needsUpdate = true;
+		open.needsUpdate = true;
 
-		Log.info("Pasted " + state.getLoadedName() + " at " + offsetX + ", " + offsetY + ", " + offsetZ
+		Log.info("Pasted " + open.getLoadedName() + " at " + offsetX + ", " + offsetY + ", " + offsetZ
 				+ " - " + placed + " block(s), " + entities + " block entit" + (entities == 1 ? "y" : "ies")
 				+ ", " + repairs.metadata + " turned back the way they were saved, "
 				+ (System.currentTimeMillis() - started) + " ms");
 		if (repairs.lost > 0) {
-			Log.warn(repairs.lost + " block(s) of " + state.getLoadedName() + " would not stay where they"
+			Log.warn(repairs.lost + " block(s) of " + open.getLoadedName() + " would not stay where they"
 					+ " were put. A schematic cut through something one of its blocks was attached to"
 					+ " has nothing to attach it to unless the world already holds it.");
 		}

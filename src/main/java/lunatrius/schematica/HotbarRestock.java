@@ -212,23 +212,29 @@ public final class HotbarRestock {
 	}
 
 	/**
-	 * Every item the loaded schematic would be built out of. Walked rather than kept up to date,
+	 * Every item any open schematic would be built out of. Walked rather than kept up to date,
 	 * because it is only ever asked for on the rare click that finds the hotbar full.
+	 *
+	 * <p>All of them rather than the one the move screen is pointed at, because easy place builds
+	 * whichever one is being aimed at: a slot holding something from the schematic next door is
+	 * still a slot the next click may want back.
 	 */
 	private static Set<Integer> itemsUsed() {
 		Set<Integer> items = new HashSet<>();
-		SchematicWorld world = Schematica.STATE.schematic;
-		if (world == null) {
-			return items;
-		}
+		for (OpenSchematic open : Schematica.STATE.getOpen()) {
+			SchematicWorld world = open.schematic;
+			if (world == null) {
+				continue;
+			}
 
-		Schematic schematic = world.getSchematic();
-		for (int x = 0; x < schematic.getWidth(); x++) {
-			for (int y = 0; y < schematic.getHeight(); y++) {
-				for (int z = 0; z < schematic.getLength(); z++) {
-					int item = BlockItems.itemFor(schematic.getBlockId(x, y, z));
-					if (item > 0) {
-						items.add(item);
+			Schematic schematic = world.getSchematic();
+			for (int x = 0; x < schematic.getWidth(); x++) {
+				for (int y = 0; y < schematic.getHeight(); y++) {
+					for (int z = 0; z < schematic.getLength(); z++) {
+						int item = BlockItems.itemFor(schematic.getBlockId(x, y, z));
+						if (item > 0) {
+							items.add(item);
+						}
 					}
 				}
 			}

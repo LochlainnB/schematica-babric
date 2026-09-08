@@ -145,7 +145,7 @@ public class MaterialListScreen extends Screen {
 	}
 
 	private String emptyMessage() {
-		return Translations.get(Schematica.STATE.schematic == null
+		return Translations.get(Schematica.STATE.getActive().isEmpty()
 				? "schematic.materials.none"
 				: "schematic.materials.empty");
 	}

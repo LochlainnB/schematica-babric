@@ -2,8 +2,10 @@ package lunatrius.schematica.render;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
 
+import lunatrius.schematica.OpenSchematic;
 import lunatrius.schematica.Schematica;
 import lunatrius.schematica.SchematicaConfig;
 import lunatrius.schematica.SchematicaState;
@@ -23,21 +25,26 @@ import net.minecraft.world.BlockView;
 import org.lwjgl.opengl.GL11;
 
 /**
- * Draws the loaded schematic as a ghost overlay, plus the save-selection guide boxes.
+ * Draws every open schematic as a ghost overlay, plus the save-selection guide boxes.
  *
- * <p>The schematic is cut into 16x16x16 regions, each holding two display lists - the ghost blocks
+ * <p>Each schematic is cut into 16x16x16 regions, each holding two display lists - the ghost blocks
  * and the coloured comparison boxes over them. A region is rebuilt only when something it covers
  * changed, and only regions the camera can actually see are drawn, so the cost of both halves
  * tracks what is on screen rather than the size of the schematic.
  *
- * <p>Rebuilding is also capped at {@link #REBUILD_BUDGET_NANOS} per frame. Whole-schematic
- * invalidations - moving it, rotating it, changing a render setting - are unavoidable, because
- * every block is compared against the world underneath it; spreading one over a handful of frames
- * turns what was a stall proportional to the schematic's volume into a visible refresh.
+ * <p>Rebuilding is capped at {@link #REBUILD_BUDGET_NANOS} per frame - for all of them together,
+ * not each. Whole-schematic invalidations are unavoidable, because every block is compared against
+ * the world underneath it; spreading one over a handful of frames turns what was a stall
+ * proportional to the schematic's volume into a visible refresh. Sharing one budget is what keeps
+ * that true with six schematics open: the dirty regions of all of them go into one queue sorted by
+ * distance from the camera, so the nearest work is done first whichever schematic it belongs to,
+ * and a frame costs the same whether the work in front of the player came from one build or four.
  *
  * <p>Everything is drawn from {@code renderWeather}, which runs inside the world pass with the
- * camera at the origin - so geometry is submitted in schematic-local coordinates after translating
- * by {@code offset - cameraPosition}.
+ * camera at the origin. The modelview is translated by {@code -cameraPosition} once, which puts it
+ * in world coordinates - the space the culling planes and the guide boxes are then in - and each
+ * schematic is drawn inside a further translation by its own offset, so its geometry can go on
+ * being compiled and culled in schematic-local coordinates.
  */
 public class SchematicRenderer {
 	/** Face bits used by the cuboid helpers, matching vanilla's side numbering. */
@@ -74,20 +81,8 @@ public class SchematicRenderer {
 	private final SignRenderer signRenderer = new SignRenderer();
 	private final Frustum frustum = new Frustum();
 
-	private Region[] regions = new Region[0];
-	private int regionsX;
-	private int regionsY;
-	private int regionsZ;
-
-	/** The display lists behind {@link #regions}, allocated as one contiguous run. */
-	private int listBase;
-	private int listCount;
-
-	/** What the region grid was laid out for; a rotation swaps the dimensions in place. */
-	private SchematicWorld gridSchematic;
-	private int gridWidth;
-	private int gridHeight;
-	private int gridLength;
+	/** One per open schematic that has something to draw, in the order they were opened. */
+	private final List<Overlay> overlays = new ArrayList<>();
 
 	/** Reused between frames so the per-frame rebuild pass allocates nothing. */
 	private final List<Region> rebuildQueue = new ArrayList<>();
@@ -95,7 +90,8 @@ public class SchematicRenderer {
 	/**
 	 * Highlight boxes found while a region's blocks are being compiled, packed as
 	 * {@code x | y << 4 | z << 8 | faces << 12} with the coordinates region-local. A cell can land
-	 * in at most one of the three, so a region can never overflow them.
+	 * in at most one of the three, so a region can never overflow them. Shared across schematics:
+	 * they hold what one region compile found, and only one is ever in flight.
 	 */
 	private final int[] wrongBlock = new int[REGION_VOLUME];
 	private final int[] wrongMetadata = new int[REGION_VOLUME];
@@ -104,39 +100,52 @@ public class SchematicRenderer {
 	private int wrongMetadataCount;
 	private int missingBlockCount;
 
-	/** Forces every region to be rebuilt. */
+	/** Forces every region of every open schematic to be rebuilt. */
 	public void invalidate() {
-		this.state.needsUpdate = true;
+		this.state.invalidateAll();
 	}
 
-	/** Whether any of the overlay is still waiting to be rebuilt. */
+	/** Whether any of the overlays is still waiting to be rebuilt. */
 	public boolean isRebuilding() {
-		if (this.state.schematic == null || !this.state.isRenderingSchematic) {
-			return false;
-		}
-		if (this.state.needsUpdate) {
-			return true;
-		}
-		for (Region region : this.regions) {
-			if (region.dirty) {
+		for (OpenSchematic open : this.state.getOpen()) {
+			if (open.schematic == null || !open.isRenderingSchematic) {
+				continue;
+			}
+			if (open.needsUpdate) {
 				return true;
+			}
+
+			Overlay overlay = this.findOverlay(open);
+			if (overlay == null) {
+				continue;
+			}
+			for (Region region : overlay.regions) {
+				if (region.dirty) {
+					return true;
+				}
 			}
 		}
 		return false;
 	}
 
 	/**
-	 * How many blocks the overlay is currently drawing as still to be placed, across the whole
+	 * How many blocks the overlays are currently drawing as still to be placed, across every open
 	 * schematic. Read off the compiled geometry rather than worked out again, so it answers what is
 	 * really on screen - which is the only way to tell an overlay built against a world that had not
 	 * arrived yet from one that is right.
 	 */
 	public int getGhostBlockCount() {
 		int total = 0;
-		for (Region region : this.regions) {
-			total += region.ghostBlocks;
+		for (Overlay overlay : this.overlays) {
+			total += overlay.ghostBlocks();
 		}
 		return total;
+	}
+
+	/** The same for one schematic, which is what a screen pointed at one of them asks. */
+	public int getGhostBlockCount(OpenSchematic open) {
+		Overlay overlay = this.findOverlay(open);
+		return overlay == null ? 0 : overlay.ghostBlocks();
 	}
 
 	/**
@@ -144,10 +153,11 @@ public class SchematicRenderer {
 	 * the world costs: the overlay compares that one cell against the world and nothing else reads
 	 * it, so a neighbouring region cannot be affected.
 	 */
-	public void invalidateBlock(int x, int y, int z) {
-		if (!this.gridMatches(this.state.schematic)) {
+	public void invalidateBlock(OpenSchematic open, int x, int y, int z) {
+		Overlay overlay = this.findOverlay(open);
+		if (overlay == null || !overlay.gridMatches()) {
 			// No grid to mark yet. The next frame lays one out and builds all of it regardless.
-			this.state.needsUpdate = true;
+			open.needsUpdate = true;
 			return;
 		}
 
@@ -155,11 +165,11 @@ public class SchematicRenderer {
 		int regionY = y / REGION_SIZE;
 		int regionZ = z / REGION_SIZE;
 		if (regionX < 0 || regionY < 0 || regionZ < 0
-				|| regionX >= this.regionsX || regionY >= this.regionsY || regionZ >= this.regionsZ) {
+				|| regionX >= overlay.regionsX || regionY >= overlay.regionsY || regionZ >= overlay.regionsZ) {
 			return;
 		}
 
-		this.regions[(regionX * this.regionsY + regionY) * this.regionsZ + regionZ].dirty = true;
+		overlay.regions[(regionX * overlay.regionsY + regionY) * overlay.regionsZ + regionZ].dirty = true;
 	}
 
 	/**
@@ -167,15 +177,16 @@ public class SchematicRenderer {
 	 * lands here: it brings a whole column of world at once, and the overlay is drawn by comparing
 	 * itself against that world, so the part of it standing in the new chunk is now out of date.
 	 */
-	public void invalidateBox(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
-		if (!this.gridMatches(this.state.schematic)) {
+	public void invalidateBox(OpenSchematic open, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
+		Overlay overlay = this.findOverlay(open);
+		if (overlay == null || !overlay.gridMatches()) {
 			// No grid to mark yet. The next frame lays one out and builds all of it regardless.
-			this.state.needsUpdate = true;
+			open.needsUpdate = true;
 			return;
 		}
 
 		if (maxX < 0 || maxY < 0 || maxZ < 0
-				|| minX >= this.gridWidth || minY >= this.gridHeight || minZ >= this.gridLength) {
+				|| minX >= overlay.gridWidth || minY >= overlay.gridHeight || minZ >= overlay.gridLength) {
 			// Somewhere else in the world entirely, which is where most chunks are.
 			return;
 		}
@@ -183,14 +194,14 @@ public class SchematicRenderer {
 		int fromX = Math.max(minX, 0) / REGION_SIZE;
 		int fromY = Math.max(minY, 0) / REGION_SIZE;
 		int fromZ = Math.max(minZ, 0) / REGION_SIZE;
-		int toX = Math.min(maxX, this.gridWidth - 1) / REGION_SIZE;
-		int toY = Math.min(maxY, this.gridHeight - 1) / REGION_SIZE;
-		int toZ = Math.min(maxZ, this.gridLength - 1) / REGION_SIZE;
+		int toX = Math.min(maxX, overlay.gridWidth - 1) / REGION_SIZE;
+		int toY = Math.min(maxY, overlay.gridHeight - 1) / REGION_SIZE;
+		int toZ = Math.min(maxZ, overlay.gridLength - 1) / REGION_SIZE;
 
 		for (int x = fromX; x <= toX; x++) {
 			for (int y = fromY; y <= toY; y++) {
 				for (int z = fromZ; z <= toZ; z++) {
-					this.regions[(x * this.regionsY + y) * this.regionsZ + z].dirty = true;
+					overlay.regions[(x * overlay.regionsY + y) * overlay.regionsZ + z].dirty = true;
 				}
 			}
 		}
@@ -210,7 +221,7 @@ public class SchematicRenderer {
 			return;
 		}
 
-		// Tracked every frame even when nothing is drawn: the GUIs read it to drop the schematic and
+		// Tracked every frame even when nothing is drawn: the GUIs read it to drop a schematic and
 		// the selection corners at the player's feet.
 		this.state.playerPosition.set(
 				(float) (player.field_1637 + (player.x - player.field_1637) * delta),
@@ -218,10 +229,19 @@ public class SchematicRenderer {
 				(float) (player.field_1639 + (player.z - player.field_1639) * delta));
 		this.state.rotationRender = (int) ((player.yaw / 90.0F % 4.0F + 4.0F) % 4.0F);
 
-		SchematicWorld schematic = this.state.schematic;
-		boolean drawSchematic = this.state.isRenderingSchematic && schematic != null;
-		if (!drawSchematic && !this.state.isRenderingGuide) {
-			// The cached regions are deliberately left alone: hiding the overlay and bringing it back
+		// Before the early return: a schematic closed while nothing is being drawn still has display
+		// lists out on loan from the driver, and this is what hands them back.
+		this.syncOverlays();
+
+		boolean drawSchematics = false;
+		for (Overlay overlay : this.overlays) {
+			if (overlay.isDrawn()) {
+				drawSchematics = true;
+				break;
+			}
+		}
+		if (!drawSchematics && !this.state.isRenderingGuide) {
+			// The cached regions are deliberately left alone: hiding an overlay and bringing it back
 			// is then free, and world changes keep marking regions dirty while it is hidden.
 			return;
 		}
@@ -232,103 +252,165 @@ public class SchematicRenderer {
 		GL11.glEnable(GL11.GL_DEPTH_TEST);
 		GL11.glDepthMask(true);
 
-		GL11.glTranslatef(-this.state.getTranslationX(), -this.state.getTranslationY(), -this.state.getTranslationZ());
-		// From here on the modelview maps schematic-local coordinates, so the culling planes are in
-		// the same space as the region bounds.
+		// Into world coordinates: each schematic is then drawn inside one more translation by its
+		// own offset, and one set of culling planes serves all of them.
+		GL11.glTranslatef(
+				-this.state.playerPosition.x, -this.state.playerPosition.y, -this.state.playerPosition.z);
 		this.frustum.update();
 
-		if (drawSchematic) {
-			this.syncGrid(schematic);
-			if (this.state.needsUpdate) {
-				this.markAllDirty();
-				this.state.needsUpdate = false;
-			}
-			this.updateVisibility();
-			this.rebuildDirtyRegions(minecraft, schematic);
-
-			for (Region region : this.regions) {
-				if (region.visible && region.ghostBlocks > 0) {
-					GL11.glCallList(region.blockList);
+		if (drawSchematics) {
+			this.rebuildQueue.clear();
+			for (Overlay overlay : this.overlays) {
+				if (!overlay.isDrawn()) {
+					continue;
+				}
+				this.syncGrid(overlay);
+				if (overlay.open.needsUpdate) {
+					overlay.markAllDirty();
+					overlay.open.needsUpdate = false;
+				}
+				this.updateVisibility(overlay);
+				for (Region region : overlay.regions) {
+					if (region.dirty) {
+						this.rebuildQueue.add(region);
+					}
 				}
 			}
+			this.rebuildDirtyRegions(minecraft);
 
-			this.renderBlockEntities(minecraft, schematic);
+			for (Overlay overlay : this.overlays) {
+				if (!overlay.isDrawn()) {
+					continue;
+				}
+				GL11.glPushMatrix();
+				this.translateTo(overlay);
+				for (Region region : overlay.regions) {
+					if (region.visible && region.ghostBlocks > 0) {
+						GL11.glCallList(region.blockList);
+					}
+				}
+				this.renderBlockEntities(minecraft, overlay);
+				GL11.glPopMatrix();
+			}
 		}
 
 		GL11.glDisable(GL11.GL_TEXTURE_2D);
 		GL11.glLineWidth(1.5F);
 
-		if (drawSchematic) {
-			for (Region region : this.regions) {
-				if (region.visible && region.hasOverlay) {
-					GL11.glCallList(region.overlayList);
+		if (drawSchematics) {
+			for (Overlay overlay : this.overlays) {
+				if (!overlay.isDrawn()) {
+					continue;
 				}
+				GL11.glPushMatrix();
+				this.translateTo(overlay);
+				for (Region region : overlay.regions) {
+					if (region.visible && region.hasOverlay) {
+						GL11.glCallList(region.overlayList);
+					}
+				}
+				this.drawBoundingBox(overlay.open.schematic);
+				GL11.glPopMatrix();
 			}
-			this.drawBoundingBox(schematic);
 		}
 		if (this.state.isRenderingGuide) {
+			// Drawn in world coordinates, where its corners already are: the selection is a place in
+			// the world rather than a part of any one schematic.
 			this.drawGuide();
 		}
 
 		GL11.glEnable(GL11.GL_TEXTURE_2D);
-		GL11.glTranslatef(this.state.getTranslationX(), this.state.getTranslationY(), this.state.getTranslationZ());
 		GL11.glDisable(GL11.GL_BLEND);
 		GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
 		GL11.glPopMatrix();
 	}
 
-	// --- the region grid ---------------------------------------------------------------------
-
-	private boolean gridMatches(SchematicWorld schematic) {
-		return schematic != null
-				&& this.gridSchematic == schematic
-				&& this.gridWidth == schematic.getWidth()
-				&& this.gridHeight == schematic.getHeight()
-				&& this.gridLength == schematic.getLength();
+	private void translateTo(Overlay overlay) {
+		GL11.glTranslatef(overlay.open.offset.x, overlay.open.offset.y, overlay.open.offset.z);
 	}
 
+	// --- one overlay per open schematic ---------------------------------------------------------
+
+	private Overlay findOverlay(OpenSchematic open) {
+		for (Overlay overlay : this.overlays) {
+			if (overlay.open == open) {
+				return overlay;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Brings the overlays into line with what is open: one for each loaded schematic, and none for
+	 * a slot that has been closed or emptied.
+	 *
+	 * <p>Where the display lists of a closed schematic are handed back. That has to happen on the
+	 * thread holding the context, which is this one, and it is why closing a schematic anywhere else
+	 * in the mod is only ever a matter of dropping it from the list.
+	 */
+	private void syncOverlays() {
+		List<OpenSchematic> open = this.state.getOpen();
+
+		for (Iterator<Overlay> iterator = this.overlays.iterator(); iterator.hasNext();) {
+			Overlay overlay = iterator.next();
+			if (overlay.open.schematic == null || !open.contains(overlay.open)) {
+				overlay.releaseLists();
+				iterator.remove();
+			}
+		}
+
+		for (OpenSchematic schematic : open) {
+			if (schematic.schematic != null && this.findOverlay(schematic) == null) {
+				this.overlays.add(new Overlay(schematic));
+			}
+		}
+	}
+
+	// --- the region grid ---------------------------------------------------------------------
+
 	/** Lays out a fresh grid whenever a schematic is loaded, or a rotation changes its shape. */
-	private void syncGrid(SchematicWorld schematic) {
-		if (this.gridMatches(schematic)) {
+	private void syncGrid(Overlay overlay) {
+		if (overlay.gridMatches()) {
 			return;
 		}
 
-		this.releaseLists();
+		overlay.releaseLists();
 
-		this.gridSchematic = schematic;
-		this.gridWidth = schematic.getWidth();
-		this.gridHeight = schematic.getHeight();
-		this.gridLength = schematic.getLength();
+		SchematicWorld schematic = overlay.open.schematic;
+		overlay.gridSchematic = schematic;
+		overlay.gridWidth = schematic.getWidth();
+		overlay.gridHeight = schematic.getHeight();
+		overlay.gridLength = schematic.getLength();
 
-		this.regionsX = regionCount(this.gridWidth);
-		this.regionsY = regionCount(this.gridHeight);
-		this.regionsZ = regionCount(this.gridLength);
+		overlay.regionsX = regionCount(overlay.gridWidth);
+		overlay.regionsY = regionCount(overlay.gridHeight);
+		overlay.regionsZ = regionCount(overlay.gridLength);
 
-		int count = this.regionsX * this.regionsY * this.regionsZ;
+		int count = overlay.regionsX * overlay.regionsY * overlay.regionsZ;
 		int base = GL11.glGenLists(count * 2);
 		if (base == 0) {
 			Log.error("The driver would not hand out " + (count * 2) + " display lists;"
 					+ " the schematic cannot be drawn.");
-			this.regions = new Region[0];
-			this.regionsX = 0;
-			this.regionsY = 0;
-			this.regionsZ = 0;
+			overlay.regions = new Region[0];
+			overlay.regionsX = 0;
+			overlay.regionsY = 0;
+			overlay.regionsZ = 0;
 			return;
 		}
 
-		this.listBase = base;
-		this.listCount = count * 2;
-		this.regions = new Region[count];
+		overlay.listBase = base;
+		overlay.listCount = count * 2;
+		overlay.regions = new Region[count];
 
 		int index = 0;
-		for (int x = 0; x < this.regionsX; x++) {
-			for (int y = 0; y < this.regionsY; y++) {
-				for (int z = 0; z < this.regionsZ; z++) {
-					this.regions[index] = new Region(
+		for (int x = 0; x < overlay.regionsX; x++) {
+			for (int y = 0; y < overlay.regionsY; y++) {
+				for (int z = 0; z < overlay.regionsZ; z++) {
+					overlay.regions[index] = new Region(overlay,
 							x * REGION_SIZE, y * REGION_SIZE, z * REGION_SIZE,
-							Math.min((x + 1) * REGION_SIZE, this.gridWidth),
-							Math.min((y + 1) * REGION_SIZE, this.gridHeight),
-							Math.min((z + 1) * REGION_SIZE, this.gridLength),
+							Math.min((x + 1) * REGION_SIZE, overlay.gridWidth),
+							Math.min((y + 1) * REGION_SIZE, overlay.gridHeight),
+							Math.min((z + 1) * REGION_SIZE, overlay.gridLength),
 							base + index * 2, base + index * 2 + 1);
 					index++;
 				}
@@ -336,34 +418,35 @@ public class SchematicRenderer {
 		}
 	}
 
-	private void releaseLists() {
-		if (this.listCount > 0) {
-			GL11.glDeleteLists(this.listBase, this.listCount);
-			this.listBase = 0;
-			this.listCount = 0;
-		}
-	}
+	/**
+	 * Culls every region against the view, and records how far each is from the camera.
+	 *
+	 * <p>Both in world coordinates, so that the distances of two schematics standing in different
+	 * places can be compared against each other in the one rebuild queue.
+	 */
+	private void updateVisibility(Overlay overlay) {
+		float originX = overlay.open.offset.x;
+		float originY = overlay.open.offset.y;
+		float originZ = overlay.open.offset.z;
+		double cameraX = this.state.playerPosition.x;
+		double cameraY = this.state.playerPosition.y;
+		double cameraZ = this.state.playerPosition.z;
 
-	private void markAllDirty() {
-		for (Region region : this.regions) {
-			region.dirty = true;
-		}
-	}
+		for (Region region : overlay.regions) {
+			float minX = originX + region.minX;
+			float minY = originY + region.minY;
+			float minZ = originZ + region.minZ;
+			float maxX = originX + region.maxX;
+			float maxY = originY + region.maxY;
+			float maxZ = originZ + region.maxZ;
 
-	/** Culls every region against the view, and records how far each is from the camera. */
-	private void updateVisibility() {
-		float cameraX = this.state.getTranslationX();
-		float cameraY = this.state.getTranslationY();
-		float cameraZ = this.state.getTranslationZ();
-
-		for (Region region : this.regions) {
 			region.visible = this.frustum.isBoxVisible(
-					region.minX - CULL_MARGIN, region.minY - CULL_MARGIN, region.minZ - CULL_MARGIN,
-					region.maxX + CULL_MARGIN, region.maxY + CULL_MARGIN, region.maxZ + CULL_MARGIN);
+					minX - CULL_MARGIN, minY - CULL_MARGIN, minZ - CULL_MARGIN,
+					maxX + CULL_MARGIN, maxY + CULL_MARGIN, maxZ + CULL_MARGIN);
 
-			double dx = (region.minX + region.maxX) * 0.5 - cameraX;
-			double dy = (region.minY + region.maxY) * 0.5 - cameraY;
-			double dz = (region.minZ + region.maxZ) * 0.5 - cameraZ;
+			double dx = (minX + maxX) * 0.5 - cameraX;
+			double dy = (minY + maxY) * 0.5 - cameraY;
+			double dz = (minZ + maxZ) * 0.5 - cameraZ;
 			region.sortKey = dx * dx + dy * dy + dz * dz + (region.visible ? 0.0 : OFF_SCREEN);
 		}
 	}
@@ -372,25 +455,15 @@ public class SchematicRenderer {
 
 	/**
 	 * Rebuilds dirty regions nearest-first until the frame's budget runs out, so whatever the player
-	 * is looking at catches up before anything behind them does.
+	 * is looking at catches up before anything behind them does - whichever schematic it belongs to.
 	 */
-	private void rebuildDirtyRegions(Minecraft minecraft, SchematicWorld schematic) {
-		if (this.state.blockRenderer == null) {
-			return;
-		}
-
-		this.rebuildQueue.clear();
-		for (Region region : this.regions) {
-			if (region.dirty) {
-				this.rebuildQueue.add(region);
-			}
-		}
+	private void rebuildDirtyRegions(Minecraft minecraft) {
 		if (this.rebuildQueue.isEmpty()) {
 			return;
 		}
 		this.rebuildQueue.sort(BY_SORT_KEY);
 
-		// Smooth lighting samples neighbours through the BlockView; the schematic reports a flat
+		// Smooth lighting samples neighbours through the BlockView; a schematic reports a flat
 		// brightness, so it is turned off for the duration of the sweep.
 		boolean ambientOcclusion = minecraft.options.ao;
 		minecraft.options.ao = false;
@@ -398,7 +471,11 @@ public class SchematicRenderer {
 		try {
 			long deadline = System.nanoTime() + REBUILD_BUDGET_NANOS;
 			for (int i = 0; i < this.rebuildQueue.size(); i++) {
-				this.rebuildRegion(minecraft, schematic, this.rebuildQueue.get(i));
+				Region region = this.rebuildQueue.get(i);
+				if (region.overlay.open.blockRenderer == null) {
+					continue;
+				}
+				this.rebuildRegion(minecraft, region);
 				if (System.nanoTime() >= deadline) {
 					break;
 				}
@@ -408,27 +485,29 @@ public class SchematicRenderer {
 		}
 	}
 
-	private void rebuildRegion(Minecraft minecraft, SchematicWorld schematic, Region region) {
+	private void rebuildRegion(Minecraft minecraft, Region region) {
 		region.dirty = false;
 		this.wrongBlockCount = 0;
 		this.wrongMetadataCount = 0;
 		this.missingBlockCount = 0;
 
+		OpenSchematic open = region.overlay.open;
+		SchematicWorld schematic = open.schematic;
 		BlockView world = minecraft.world;
-		class_13 blockRenderer = this.state.blockRenderer;
+		class_13 blockRenderer = open.blockRenderer;
 
 		int minY = region.minY;
 		int maxY = region.maxY;
-		if (this.state.renderingLayer >= 0) {
+		if (open.renderingLayer >= 0) {
 			// A region outside the slice ends up with minY >= maxY, which compiles two empty lists -
 			// the old geometry has to go somewhere, and leaving it behind would draw it.
-			minY = Math.max(minY, this.state.renderingLayer);
-			maxY = Math.min(maxY, this.state.renderingLayer + 1);
+			minY = Math.max(minY, open.renderingLayer);
+			maxY = Math.min(maxY, open.renderingLayer + 1);
 		}
 
-		int offsetX = this.state.offset.x;
-		int offsetY = this.state.offset.y;
-		int offsetZ = this.state.offset.z;
+		int offsetX = open.offset.x;
+		int offsetY = open.offset.y;
+		int offsetZ = open.offset.z;
 		int ghostBlocks = 0;
 
 		GL11.glNewList(region.blockList, GL11.GL_COMPILE);
@@ -564,13 +643,13 @@ public class SchematicRenderer {
 	}
 
 	private void drawGuide() {
-		Vec3i min = this.state.pointMin.copy().sub(this.state.offset);
-		Vec3i max = this.state.pointMax.copy().sub(this.state.offset).add(1);
 		float delta = this.config.blockDelta;
 
 		GL11.glColor4f(0.0F, 0.75F, 0.0F, 0.25F);
 		GL11.glBegin(GL11.GL_LINES);
-		boxLines(min.x - delta, min.y - delta, min.z - delta, max.x + delta, max.y + delta, max.z + delta, ALL_FACES);
+		boxLines(this.state.pointMin.x - delta, this.state.pointMin.y - delta, this.state.pointMin.z - delta,
+				this.state.pointMax.x + 1 + delta, this.state.pointMax.y + 1 + delta, this.state.pointMax.z + 1 + delta,
+				ALL_FACES);
 		GL11.glEnd();
 
 		this.drawGuideCorner(this.state.pointA, 0.75F, 0.0F, 0.0F);
@@ -579,9 +658,9 @@ public class SchematicRenderer {
 
 	private void drawGuideCorner(Vec3i point, float red, float green, float blue) {
 		float delta = this.config.blockDelta;
-		float x = point.x - this.state.offset.x - delta;
-		float y = point.y - this.state.offset.y - delta;
-		float z = point.z - this.state.offset.z - delta;
+		float x = point.x - delta;
+		float y = point.y - delta;
+		float z = point.z - delta;
 		float maxX = x + 1 + delta * 2;
 		float maxY = y + 1 + delta * 2;
 		float maxZ = z + 1 + delta * 2;
@@ -597,14 +676,16 @@ public class SchematicRenderer {
 
 	// --- block entities ----------------------------------------------------------------------
 
-	private void renderBlockEntities(Minecraft minecraft, SchematicWorld schematic) {
+	private void renderBlockEntities(Minecraft minecraft, Overlay overlay) {
+		OpenSchematic open = overlay.open;
+		SchematicWorld schematic = open.schematic;
 		BlockView world = minecraft.world;
 
 		int minY = 0;
 		int maxY = schematic.getHeight();
-		if (this.state.renderingLayer >= 0) {
-			minY = this.state.renderingLayer;
-			maxY = Math.min(maxY, this.state.renderingLayer + 1);
+		if (open.renderingLayer >= 0) {
+			minY = open.renderingLayer;
+			maxY = Math.min(maxY, open.renderingLayer + 1);
 		}
 
 		GL11.glColor4f(1.0F, 1.0F, 1.0F, this.config.alpha);
@@ -617,13 +698,15 @@ public class SchematicRenderer {
 			if (y < minY || y >= maxY) {
 				continue;
 			}
-			// A big build can carry thousands of chests and signs, and each one is a draw call.
-			if (!this.frustum.isBoxVisible(x - CULL_MARGIN, y - CULL_MARGIN, z - CULL_MARGIN,
-					x + 1 + CULL_MARGIN, y + 1 + CULL_MARGIN, z + 1 + CULL_MARGIN)) {
+			// A big build can carry thousands of chests and signs, and each one is a draw call. The
+			// culling planes are in world coordinates, so the position is put back into them first.
+			if (!this.frustum.isBoxVisible(
+					x + open.offset.x - CULL_MARGIN, y + open.offset.y - CULL_MARGIN, z + open.offset.z - CULL_MARGIN,
+					x + open.offset.x + 1 + CULL_MARGIN, y + open.offset.y + 1 + CULL_MARGIN, z + open.offset.z + 1 + CULL_MARGIN)) {
 				continue;
 			}
 			// Only draw the ghost where the real world is still empty.
-			if (world.getBlockId(x + this.state.offset.x, y + this.state.offset.y, z + this.state.offset.z) != 0) {
+			if (world.getBlockId(x + open.offset.x, y + open.offset.y, z + open.offset.z) != 0) {
 				continue;
 			}
 
@@ -716,8 +799,73 @@ public class SchematicRenderer {
 		return Math.max(1, (blocks + REGION_SIZE - 1) / REGION_SIZE);
 	}
 
-	/** One 16x16x16 slice of the schematic and the two display lists caching it. */
+	/** The cached geometry of one open schematic: its region grid and the display lists behind it. */
+	private static final class Overlay {
+		final OpenSchematic open;
+
+		Region[] regions = new Region[0];
+		int regionsX;
+		int regionsY;
+		int regionsZ;
+
+		/** The display lists behind {@link #regions}, allocated as one contiguous run. */
+		int listBase;
+		int listCount;
+
+		/** What the region grid was laid out for; a rotation swaps the dimensions in place. */
+		SchematicWorld gridSchematic;
+		int gridWidth;
+		int gridHeight;
+		int gridLength;
+
+		Overlay(OpenSchematic open) {
+			this.open = open;
+		}
+
+		/** Whether this schematic is both loaded and being shown. */
+		boolean isDrawn() {
+			return this.open.schematic != null && this.open.isRenderingSchematic;
+		}
+
+		boolean gridMatches() {
+			SchematicWorld schematic = this.open.schematic;
+			return schematic != null
+					&& this.gridSchematic == schematic
+					&& this.gridWidth == schematic.getWidth()
+					&& this.gridHeight == schematic.getHeight()
+					&& this.gridLength == schematic.getLength();
+		}
+
+		void markAllDirty() {
+			for (Region region : this.regions) {
+				region.dirty = true;
+			}
+		}
+
+		int ghostBlocks() {
+			int total = 0;
+			for (Region region : this.regions) {
+				total += region.ghostBlocks;
+			}
+			return total;
+		}
+
+		void releaseLists() {
+			if (this.listCount > 0) {
+				GL11.glDeleteLists(this.listBase, this.listCount);
+				this.listBase = 0;
+				this.listCount = 0;
+			}
+			this.gridSchematic = null;
+			this.regions = new Region[0];
+		}
+	}
+
+	/** One 16x16x16 slice of a schematic and the two display lists caching it. */
 	private static final class Region {
+		/** Whose slice this is, which is how the rebuild queue can hold regions of several. */
+		final Overlay overlay;
+
 		final int minX;
 		final int minY;
 		final int minZ;
@@ -738,7 +886,9 @@ public class SchematicRenderer {
 		/** Distance from the camera, with off-screen regions pushed to the back of the queue. */
 		double sortKey;
 
-		Region(int minX, int minY, int minZ, int maxX, int maxY, int maxZ, int blockList, int overlayList) {
+		Region(Overlay overlay, int minX, int minY, int minZ, int maxX, int maxY, int maxZ,
+				int blockList, int overlayList) {
+			this.overlay = overlay;
 			this.minX = minX;
 			this.minY = minY;
 			this.minZ = minZ;

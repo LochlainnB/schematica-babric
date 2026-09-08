@@ -3,7 +3,7 @@ package lunatrius.schematica.schematic;
 import java.util.HashMap;
 import java.util.Map;
 
-import lunatrius.schematica.Schematica;
+import lunatrius.schematica.OpenSchematic;
 import net.minecraft.block.Block;
 import net.minecraft.block.Material;
 import net.minecraft.block.entity.BlockEntity;
@@ -24,11 +24,18 @@ import net.minecraft.world.World;
  */
 public class SchematicWorld extends World {
 	private final Schematic schematic;
+	/**
+	 * The slot this is open in, asked for the layer slice below. A back-reference rather than a
+	 * layer of its own, because the slice belongs to the schematic being drawn rather than to this
+	 * view of it: two schematics open at once are each sliced where their own owner says.
+	 */
+	private final OpenSchematic owner;
 
-	public SchematicWorld(World template, Schematic schematic) {
+	public SchematicWorld(OpenSchematic owner, World template, Schematic schematic) {
 		// A *fresh* dimension: World's copy constructor calls dimension.method_1768(this), which
 		// would otherwise repoint the live world's dimension (and its biome source) at us.
 		super(template, class_50.method_1767(0));
+		this.owner = owner;
 		this.schematic = schematic;
 		this.isRemote = true;
 
@@ -101,7 +108,8 @@ public class SchematicWorld extends World {
 	/** Whether the block at this position is a full opaque cube (used for face culling). */
 	@Override
 	public boolean method_1783(int x, int y, int z) {
-		if (Schematica.STATE.renderingLayer != -1 && Schematica.STATE.renderingLayer != y) {
+		int layer = this.owner == null ? -1 : this.owner.renderingLayer;
+		if (layer != -1 && layer != y) {
 			return false;
 		}
 		Block block = this.getBlock(x, y, z);

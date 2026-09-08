@@ -12,6 +12,7 @@ import java.util.Properties;
 import lunatrius.schematica.EasyPlace;
 import lunatrius.schematica.HotbarRestock;
 import lunatrius.schematica.MaterialList;
+import lunatrius.schematica.OpenSchematic;
 import lunatrius.schematica.SchematicMemory;
 import lunatrius.schematica.SchematicPaste;
 import lunatrius.schematica.Schematica;
@@ -701,7 +702,7 @@ public final class SmokeTest {
 	 */
 	private static void runMaterialScreenTests(Minecraft mc) {
 		SchematicaState state = Schematica.STATE;
-		if (state.schematic == null || mc.player == null) {
+		if (state.getActive().schematic == null || mc.player == null) {
 			Log.info("SMOKETEST: no schematic loaded, skipping the material list screen checks");
 			return;
 		}
@@ -741,7 +742,7 @@ public final class SmokeTest {
 	 */
 	private static void runInfoHudScreenTests(Minecraft mc) {
 		SchematicaState state = Schematica.STATE;
-		if (state.schematic == null || mc.player == null) {
+		if (state.getActive().schematic == null || mc.player == null) {
 			Log.info("SMOKETEST: no schematic loaded, skipping the info hud checks");
 			return;
 		}
@@ -1144,7 +1145,7 @@ public final class SmokeTest {
 		SchematicaState state = Schematica.STATE;
 		Log.info("SMOKETEST: --- what was open on the server ---");
 
-		state.offset.set(SERVER_REJOIN_X, SERVER_REJOIN_Y, SERVER_REJOIN_Z);
+		state.getActive().offset.set(SERVER_REJOIN_X, SERVER_REJOIN_Y, SERVER_REJOIN_Z);
 		state.rotateSchematic();
 		state.rotateSchematic();
 
@@ -1155,11 +1156,11 @@ public final class SmokeTest {
 		SchematicMemory.onWorldReady();
 		SchematicMemory.tick(mc);
 
-		checkTrue("the schematic left open on a server is put back", state.schematic != null);
+		checkTrue("the schematic left open on a server is put back", state.getActive().schematic != null);
 		checkText("and it is the same file", state.getLoadedName(), "smoketest-server.schematic");
-		check("standing where it was left, x", state.offset.x, SERVER_REJOIN_X);
-		check("standing where it was left, y", state.offset.y, SERVER_REJOIN_Y);
-		check("standing where it was left, z", state.offset.z, SERVER_REJOIN_Z);
+		check("standing where it was left, x", state.getActive().offset.x, SERVER_REJOIN_X);
+		check("standing where it was left, y", state.getActive().offset.y, SERVER_REJOIN_Y);
+		check("standing where it was left, z", state.getActive().offset.z, SERVER_REJOIN_Z);
 		check("turned the way it was left", state.getTurns(), 2);
 		checkTrue("into a world that belongs to a server rather than to us", mc.isWorldRemote());
 
@@ -1173,9 +1174,9 @@ public final class SmokeTest {
 		File area = new File(state.getSchematicDirectory(), "smoketest-server-area.schematic");
 		if (state.saveSchematic(area, new Vec3i(x, y, z), new Vec3i(x + 4, y + 4, z + 4))
 				&& state.loadSchematic(area)) {
-			state.offset.set(x, y, z);
+			state.getActive().offset.set(x, y, z);
 			state.setRenderingLayer(-1);
-			state.isRenderingSchematic = true;
+			state.getActive().isRenderingSchematic = true;
 			Log.info("SMOKETEST: leaving a note for a restore run - " + state.getLoadedName()
 					+ " at " + x + ", " + y + ", " + z);
 		} else {
@@ -1203,8 +1204,8 @@ public final class SmokeTest {
 			airX = px;
 			airY = y;
 			airZ = pz;
-			Schematica.STATE.offset.set(airX, airY, airZ);
-			Schematica.STATE.needsUpdate = true;
+			Schematica.STATE.getActive().offset.set(airX, airY, airZ);
+			Schematica.STATE.getActive().needsUpdate = true;
 			Log.info("SMOKETEST: one gold block wanted in mid air at " + airX + ", " + airY + ", " + airZ);
 			checkTrue("there is nothing at all around the position in the air",
 					isSurroundedByAir(mc, airX, airY, airZ));
@@ -1333,9 +1334,9 @@ public final class SmokeTest {
 			return false;
 		}
 
-		state.offset.set(targetX, targetY, targetZ);
-		state.isRenderingSchematic = true;
-		state.needsUpdate = true;
+		state.getActive().offset.set(targetX, targetY, targetZ);
+		state.getActive().isRenderingSchematic = true;
+		state.getActive().needsUpdate = true;
 		Log.info("SMOKETEST: one gold block wanted at " + targetX + ", " + targetY + ", " + targetZ
 				+ ", reached by clicking the top of " + hitX + ", " + hitY + ", " + hitZ);
 		return true;
@@ -1482,7 +1483,7 @@ public final class SmokeTest {
 			return;
 		}
 
-		Schematic schematic = state.schematic.getSchematic();
+		Schematic schematic = state.getActive().schematic.getSchematic();
 		check("width", schematic.getWidth(), STRUCTURE_SIZE);
 		check("height", schematic.getHeight(), 3);
 		check("length", schematic.getLength(), STRUCTURE_SIZE);
@@ -1502,9 +1503,9 @@ public final class SmokeTest {
 		}
 
 		// Park the ghost next to the original and look at both.
-		state.offset.set(baseX, baseY, baseZ + STRUCTURE_SIZE + 2);
-		state.isRenderingSchematic = true;
-		state.needsUpdate = true;
+		state.getActive().offset.set(baseX, baseY, baseZ + STRUCTURE_SIZE + 2);
+		state.getActive().isRenderingSchematic = true;
+		state.getActive().needsUpdate = true;
 
 		parkCamera(mc);
 		mc.options.thirdPerson = false;
@@ -1518,13 +1519,16 @@ public final class SmokeTest {
 	private static void leaveWorld(Minecraft mc) {
 		SchematicaState state = Schematica.STATE;
 		File file = new File(state.getSchematicDirectory(), "smoketest.schematic");
+		// One schematic, whatever the scenes above left open: what comes back is checked one field
+		// at a time on the way in, and that only means anything against a known set.
+		state.closeAll();
 		if (!state.loadSchematic(file)) {
 			fail("loadSchematic returned false", null);
 			finish(mc);
 			return;
 		}
 
-		state.offset.set(REJOIN_X, REJOIN_Y, REJOIN_Z);
+		state.getActive().offset.set(REJOIN_X, REJOIN_Y, REJOIN_Z);
 		state.rotateSchematic();
 		state.setRenderingLayer(1);
 		Log.info("SMOKETEST: --- logging off with " + state.getLoadedName() + " open ---");
@@ -1536,7 +1540,7 @@ public final class SmokeTest {
 
 		mc.setWorld(null);
 		checkTrue("leaving the world lets go of it", SchematicMemory.getWorldId() == null);
-		checkTrue("and closes the schematic on the way out", state.schematic == null);
+		checkTrue("and closes the schematic on the way out", state.getActive().schematic == null);
 
 		mc.method_2120(WORLD_NAME, "SmokeTest", 1L);
 	}
@@ -1549,23 +1553,23 @@ public final class SmokeTest {
 		Log.info("SMOKETEST: --- back in the world ---");
 		checkText("coming back names the same world",
 				SchematicMemory.getWorldId(), "singleplayer/" + WORLD_NAME + "/0");
-		checkTrue("the schematic that was open is open again", state.schematic != null);
+		checkTrue("the schematic that was open is open again", state.getActive().schematic != null);
 		checkText("and it is the same file", state.getLoadedName(), "smoketest.schematic");
-		check("standing where it was left, x", state.offset.x, REJOIN_X);
-		check("standing where it was left, y", state.offset.y, REJOIN_Y);
-		check("standing where it was left, z", state.offset.z, REJOIN_Z);
+		check("standing where it was left, x", state.getActive().offset.x, REJOIN_X);
+		check("standing where it was left, y", state.getActive().offset.y, REJOIN_Y);
+		check("standing where it was left, z", state.getActive().offset.z, REJOIN_Z);
 		check("turned the way it was left", state.getTurns(), 1);
-		check("sliced the way it was left", state.renderingLayer, 1);
-		checkTrue("and showing, the way it was left", state.isRenderingSchematic);
+		check("sliced the way it was left", state.getActive().renderingLayer, 1);
+		checkTrue("and showing, the way it was left", state.getActive().isRenderingSchematic);
 
 		// Leave behind the note the restore run needs: the schematic square on top of the structure
 		// this run built, so a cold start has a world that really does hold those blocks to draw
 		// itself against. Written out for us when the game shuts down at the end of the run.
 		File file = new File(state.getSchematicDirectory(), "smoketest.schematic");
 		if (state.loadSchematic(file)) {
-			state.offset.set(baseX, baseY, baseZ);
+			state.getActive().offset.set(baseX, baseY, baseZ);
 			state.setRenderingLayer(-1);
-			state.isRenderingSchematic = true;
+			state.getActive().isRenderingSchematic = true;
 			Log.info("SMOKETEST: leaving a note for a restore run - " + state.getLoadedName()
 					+ " at " + baseX + ", " + baseY + ", " + baseZ);
 		}
@@ -1592,11 +1596,11 @@ public final class SmokeTest {
 			return;
 		}
 
-		if (state.schematic != null && !MULTIPLAYER) {
+		if (state.getActive().schematic != null && !MULTIPLAYER) {
 			// Stood back from the schematic and looking at it, so the rebuild budget reaches it and
 			// the screenshots show what is being talked about. Left alone on a server, which would
 			// have to be talked into the move and has no reason to agree.
-			mc.player.method_1341(state.offset.x + 2.5, state.offset.y + 6.0, state.offset.z - 9.0,
+			mc.player.method_1341(state.getActive().offset.x + 2.5, state.getActive().offset.y + 6.0, state.getActive().offset.z - 9.0,
 					0.0F, 22.0F);
 		}
 
@@ -1611,18 +1615,18 @@ public final class SmokeTest {
 		switch (restoreStep) {
 			case 0:
 				Log.info("SMOKETEST: --- the overlay a cold start put back ---");
-				checkTrue("starting the game cold puts the schematic back", state.schematic != null);
-				if (state.schematic == null) {
+				checkTrue("starting the game cold puts the schematic back", state.getActive().schematic != null);
+				if (state.getActive().schematic == null) {
 					finish(mc);
 					return;
 				}
 				Log.info("SMOKETEST: back with " + state.getLoadedName() + " at "
-						+ state.offset.x + ", " + state.offset.y + ", " + state.offset.z);
+						+ state.getActive().offset.x + ", " + state.getActive().offset.y + ", " + state.getActive().offset.z);
 
 				restoredGhosts = renderer.getGhostBlockCount();
 				screenshot(mc, 0);
 				// Work the comparison out again, against a world that has all arrived by now.
-				state.needsUpdate = true;
+				state.getActive().needsUpdate = true;
 				break;
 
 			case 1:
@@ -1647,7 +1651,7 @@ public final class SmokeTest {
 				// What the overlay makes of the world now, before anything is asked to rebuild.
 				restoredGhosts = renderer.getGhostBlockCount();
 				screenshot(mc, 2);
-				state.needsUpdate = true;
+				state.getActive().needsUpdate = true;
 				break;
 
 			default:
@@ -1672,7 +1676,7 @@ public final class SmokeTest {
 	 * ever hears about block changes has no way of knowing.
 	 */
 	private static int clearSilently(Minecraft mc, SchematicaState state) {
-		Schematic schematic = state.schematic.getSchematic();
+		Schematic schematic = state.getActive().schematic.getSchematic();
 		int cleared = 0;
 
 		for (int x = 0; x < schematic.getWidth(); x++) {
@@ -1680,9 +1684,9 @@ public final class SmokeTest {
 				if (schematic.getBlockId(x, 0, z) == 0) {
 					continue;
 				}
-				int worldX = state.offset.x + x;
-				int worldY = state.offset.y;
-				int worldZ = state.offset.z + z;
+				int worldX = state.getActive().offset.x + x;
+				int worldY = state.getActive().offset.y;
+				int worldZ = state.getActive().offset.z + z;
 				if (mc.world.getBlockId(worldX, worldY, worldZ) == 0) {
 					continue;
 				}
@@ -1726,7 +1730,7 @@ public final class SmokeTest {
 
 			int turns = state.getTurns();
 			boolean mirrored = state.isMirrored();
-			int[] worked = snapshot(state.schematic.getSchematic());
+			int[] worked = snapshot(state.getActive().schematic.getSchematic());
 
 			if (!state.loadSchematic(file)) {
 				fail("loadSchematic returned false", null);
@@ -1736,7 +1740,7 @@ public final class SmokeTest {
 
 			checkTrue("\"" + (run.isEmpty() ? "-" : run) + "\" is put back by "
 					+ (mirrored ? "a flip and " : "") + turns + " turn(s)",
-					Arrays.equals(worked, snapshot(state.schematic.getSchematic())));
+					Arrays.equals(worked, snapshot(state.getActive().schematic.getSchematic())));
 		}
 
 		state.clearSchematic();
@@ -1787,20 +1791,20 @@ public final class SmokeTest {
 		SchematicMemory.tick(mc);
 		checkText("a world is known by its folder and its dimension",
 				SchematicMemory.getWorldId(), "singleplayer/memory-a/0");
-		checkTrue("nothing is put back in a world never played before", state.schematic == null);
+		checkTrue("nothing is put back in a world never played before", state.getActive().schematic == null);
 
 		File schematic = new File(state.getSchematicDirectory(), "smoketest.schematic");
 		if (!state.loadSchematic(schematic)) {
 			fail("loadSchematic returned false", null);
 			return;
 		}
-		state.offset.set(12, 34, -56);
+		state.getActive().offset.set(12, 34, -56);
 		state.rotateSchematic();
 		state.mirrorSchematic();
 		state.setRenderingLayer(1);
 		// Left hidden on purpose: a schematic that comes back showing when it was put away is as
 		// wrong as one that does not come back at all.
-		state.isRenderingSchematic = false;
+		state.getActive().isRenderingSchematic = false;
 		int turns = state.getTurns();
 		boolean mirrored = state.isMirrored();
 
@@ -1810,7 +1814,7 @@ public final class SmokeTest {
 		state.clearSchematic();
 		comeBackTo("memory-b");
 		SchematicMemory.tick(mc);
-		checkTrue("another world does not get the first one schematic", state.schematic == null);
+		checkTrue("another world does not get the first one schematic", state.getActive().schematic == null);
 		SchematicMemory.onWorldLeaving();
 
 		// Reading the file back off disk is what a freshly started game does, so this is the part
@@ -1819,21 +1823,21 @@ public final class SmokeTest {
 		SchematicMemory.load(file);
 		comeBackTo("memory-a");
 		SchematicMemory.tick(mc);
-		checkTrue("coming back to a world puts the schematic back", state.schematic != null);
+		checkTrue("coming back to a world puts the schematic back", state.getActive().schematic != null);
 		checkText("the same file", state.getLoadedName(), "smoketest.schematic");
-		check("at the same x", state.offset.x, 12);
-		check("at the same y", state.offset.y, 34);
-		check("at the same z", state.offset.z, -56);
+		check("at the same x", state.getActive().offset.x, 12);
+		check("at the same y", state.getActive().offset.y, 34);
+		check("at the same z", state.getActive().offset.z, -56);
 		check("turned the same way", state.getTurns(), turns);
 		checkTrue("flipped the same way", state.isMirrored() == mirrored);
-		check("sliced to the same layer", state.renderingLayer, 1);
-		checkTrue("and still hidden, because that is how it was left", !state.isRenderingSchematic);
+		check("sliced to the same layer", state.getActive().renderingLayer, 1);
+		checkTrue("and still hidden, because that is how it was left", !state.getActive().isRenderingSchematic);
 		checkTrue("with the load list pointing at it",
 				"smoketest.schematic".equals(state.getSchematicFiles().get(state.selectedSchematic)));
 
 		// Nothing announces a schematic being moved, so the note is kept up to date while playing.
 		// That is also what is left behind by a game killed rather than closed.
-		state.offset.set(70, 71, 72);
+		state.getActive().offset.set(70, 71, 72);
 		for (int i = 0; i < 25; i++) {
 			SchematicMemory.tick(mc);
 		}
@@ -1841,10 +1845,138 @@ public final class SmokeTest {
 		SchematicMemory.load(file);
 		comeBackTo("memory-a");
 		SchematicMemory.tick(mc);
-		check("a schematic moved while playing is written down where it stopped", state.offset.x, 70);
+		check("a schematic moved while playing is written down where it stopped", state.getActive().offset.x, 70);
 
 		runSilentWorldMemoryTests(mc, file);
+		runMultiMemoryTests(mc, file);
+		runServerIdMemoryTests(mc, file);
 		runDimensionMemoryTests(mc, file);
+	}
+
+	/**
+	 * A server's note, which is where the shape of the file is most easily got wrong.
+	 *
+	 * <p>Each schematic is written under the number of its place in the world it was opened in, so a
+	 * line reads {@code <world>.<number>.<field>}. A world named by an address is full of dots and
+	 * ends in a number of its own - the dimension - so telling one number from the other is the
+	 * whole of what makes a server's note readable. An address with four numbers in it is the worst
+	 * case there is, and this uses one.
+	 *
+	 * <p>It also reads a note written before the mod could hold more than one schematic per world,
+	 * which has no number in it at all and has to come back as the first of a set.
+	 */
+	private static void runServerIdMemoryTests(Minecraft mc, File file) {
+		SchematicaState state = Schematica.STATE;
+		String host = "192.168.1.5";
+		String id = "server/" + host + ":25565/0";
+
+		Properties handMade = new Properties();
+		handMade.setProperty(id + ".schematic", "smoketest.schematic");
+		handMade.setProperty(id + ".x", "11");
+		handMade.setProperty(id + ".y", "12");
+		handMade.setProperty(id + ".z", "13");
+		try (OutputStream stream = new FileOutputStream(file)) {
+			handMade.store(stream, "written by the smoke test");
+		} catch (IOException exception) {
+			fail("could not write a server memory file by hand", exception);
+			return;
+		}
+
+		state.closeAll();
+		SchematicMemory.load(file);
+		SchematicMemory.onServerConnect(host, 25565);
+		SchematicMemory.onWorldReady();
+		SchematicMemory.tick(mc);
+
+		checkText("a server world is named by the address dialled", SchematicMemory.getWorldId(), id);
+		checkTrue("a note written against it before this version is read back",
+				!state.getActive().isEmpty());
+		check("at the place it names", state.getActive().offset.x, 11);
+
+		File schematic = new File(state.getSchematicDirectory(), "smoketest.schematic");
+		if (!state.openSchematic(schematic)) {
+			fail("openSchematic returned false against a server", null);
+			return;
+		}
+		state.getActive().offset.set(22, 33, 44);
+
+		SchematicMemory.onWorldLeaving();
+		state.closeAll();
+		SchematicMemory.load(file);
+		SchematicMemory.onServerConnect(host, 25565);
+		SchematicMemory.onWorldReady();
+		SchematicMemory.tick(mc);
+
+		check("two schematics against an address full of numbers come back", state.getOpenCount(), 2);
+		check("the one that was already there", state.getOpen().get(0).offset.x, 11);
+		check("and the one opened beside it", state.getOpen().get(1).offset.x, 22);
+
+		state.closeAll();
+		SchematicMemory.onWorldLeaving();
+	}
+
+	/**
+	 * A world left holding several schematics comes back holding all of them.
+	 *
+	 * <p>The half of the feature that cannot be seen in one sitting: the note is a list now, and a
+	 * list is only right if the places, the slices and which one the controls were on all survive
+	 * being written down and read back. The file is read off disk in between, which is what a game
+	 * started cold does.
+	 */
+	private static void runMultiMemoryTests(Minecraft mc, File file) {
+		SchematicaState state = Schematica.STATE;
+
+		SchematicMemory.onWorldLeaving();
+		state.closeAll();
+		SchematicMemory.load(file);
+		comeBackTo("memory-d");
+		SchematicMemory.tick(mc);
+		check("a world never played before starts with one empty slot", state.getOpenCount(), 1);
+
+		File schematic = new File(state.getSchematicDirectory(), "smoketest.schematic");
+		for (int i = 0; i < 3; i++) {
+			if (!state.openSchematic(schematic)) {
+				fail("openSchematic returned false for copy " + (i + 1), null);
+				return;
+			}
+			state.getActive().offset.set(1 + i * 3, 2 + i * 3, 3 + i * 3);
+		}
+		check("three of them are open", state.getOpenCount(), 3);
+		state.setActiveIndex(1);
+		state.setRenderingLayer(2);
+		state.getOpen().get(2).isRenderingSchematic = false;
+
+		SchematicMemory.onWorldLeaving();
+		state.closeAll();
+		SchematicMemory.load(file);
+		comeBackTo("memory-d");
+		SchematicMemory.tick(mc);
+
+		check("all three come back", state.getOpenCount(), 3);
+		check("the first where it was left", state.getOpen().get(0).offset.x, 1);
+		check("the second where it was left", state.getOpen().get(1).offset.x, 4);
+		check("the third where it was left", state.getOpen().get(2).offset.x, 7);
+		check("in the order they were opened", state.getOpen().get(2).offset.z, 9);
+		check("sliced the way it was left", state.getOpen().get(1).renderingLayer, 2);
+		check("and only that one", state.getOpen().get(0).renderingLayer, -1);
+		checkTrue("the one that was hidden is still hidden",
+				!state.getOpen().get(2).isRenderingSchematic);
+		check("with the controls back on the one they were on", state.getActiveIndex(), 1);
+
+		// Closing one is how a schematic is forgotten, and it must not take the others with it.
+		state.setActiveIndex(0);
+		state.closeActive();
+		SchematicMemory.onWorldLeaving();
+		state.closeAll();
+		SchematicMemory.load(file);
+		comeBackTo("memory-d");
+		SchematicMemory.tick(mc);
+		check("closing one forgets that one and no more", state.getOpenCount(), 2);
+		check("and the rest keep their places", state.getOpen().get(0).offset.x, 4);
+
+		// Leave nothing behind: the world is closed empty, which is what rubs its note out.
+		state.closeAll();
+		SchematicMemory.onWorldLeaving();
 	}
 
 	/**
@@ -1872,17 +2004,17 @@ public final class SmokeTest {
 		SchematicMemory.tick(mc);
 		checkText("a world that never says it is ready is still worked out",
 				SchematicMemory.getWorldId(), "singleplayer/memory-a/0");
-		checkTrue("and nothing has been put into it yet", state.schematic == null);
+		checkTrue("and nothing has been put into it yet", state.getActive().schematic == null);
 
 		for (int i = 0; i < RESTORE_WAIT_TICKS; i++) {
 			SchematicMemory.tick(mc);
 		}
-		checkTrue("but waiting for it to say so does not last forever", state.schematic != null);
-		check("and what was left there comes back", state.offset.x, 70);
+		checkTrue("but waiting for it to say so does not last forever", state.getActive().schematic != null);
+		check("and what was left there comes back", state.getActive().offset.x, 70);
 
 		// The half that actually broke: a world nobody announced was never written down either, so
 		// closing the game lost everything that happened in it.
-		state.offset.set(81, 82, 83);
+		state.getActive().offset.set(81, 82, 83);
 		for (int i = 0; i < 25; i++) {
 			SchematicMemory.tick(mc);
 		}
@@ -1890,7 +2022,7 @@ public final class SmokeTest {
 		SchematicMemory.load(file);
 		comeBackTo("memory-a");
 		SchematicMemory.tick(mc);
-		check("and a silent world is written down like any other", state.offset.x, 81);
+		check("and a silent world is written down like any other", state.getActive().offset.x, 81);
 	}
 
 	/**
@@ -1918,8 +2050,8 @@ public final class SmokeTest {
 		SchematicMemory.load(file);
 		comeBackTo("memory-c");
 		SchematicMemory.tick(mc);
-		checkTrue("a hand written file is read back", state.schematic != null);
-		check("and the overworld gets the overworld note, not the Nether one", state.offset.x, 1);
+		checkTrue("a hand written file is read back", state.getActive().schematic != null);
+		check("and the overworld gets the overworld note, not the Nether one", state.getActive().offset.x, 1);
 
 		// Closing a schematic is the only way to be rid of it, so it has to be one.
 		state.clearSchematic();
@@ -1927,7 +2059,7 @@ public final class SmokeTest {
 		SchematicMemory.load(file);
 		comeBackTo("memory-c");
 		SchematicMemory.tick(mc);
-		checkTrue("closing a schematic before leaving forgets it", state.schematic == null);
+		checkTrue("closing a schematic before leaving forgets it", state.getActive().schematic == null);
 
 		// Hand the real world back. The tick picks it up again next time round, and the rest of the
 		// run is watched the way any other session would be.
@@ -1969,6 +2101,7 @@ public final class SmokeTest {
 				runCoordinateFieldTests(mc);
 				runMaterialScreenTests(mc);
 				runInfoHudScreenTests(mc);
+				runMultipleSchematicTests(mc);
 				state.rotateSchematic();
 				Log.info("SMOKETEST: scene 1 - rotated");
 				return;
@@ -1977,13 +2110,13 @@ public final class SmokeTest {
 				state.rotateSchematic();
 				state.rotateSchematic();
 				state.rotateSchematic();
-				state.renderingLayer = 1;
-				state.needsUpdate = true;
+				state.getActive().renderingLayer = 1;
+				state.getActive().needsUpdate = true;
 				Log.info("SMOKETEST: scene 2 - single layer");
 				return;
 			case 2: // layer slice -> the control screen
-				state.renderingLayer = -1;
-				state.needsUpdate = true;
+				state.getActive().renderingLayer = -1;
+				state.getActive().needsUpdate = true;
 				mc.setScreen(new SchematicControlScreen());
 				Log.info("SMOKETEST: scene 3 - control screen");
 				return;
@@ -2041,6 +2174,9 @@ public final class SmokeTest {
 				Log.info("SMOKETEST: scene " + scene + " - the same schematic, camera turned to "
 						+ (int) cameraYaw + " degrees");
 				return;
+			case 15:
+				setUpPickerScene(mc);
+				return;
 			default:
 				mc.setScreen(null);
 				if (WORLD_TEST && !MULTIPLAYER) {
@@ -2050,6 +2186,49 @@ public final class SmokeTest {
 				}
 				finish(mc);
 		}
+	}
+
+	/**
+	 * Two schematics standing side by side with the move screen over them and its picker dropped
+	 * open.
+	 *
+	 * <p>The one scene that shows the list at all. What it is really watching for is depth: the list
+	 * is drawn after everything else so that it lies over the buttons it covers, and a shot where
+	 * the buttons show through it is the whole of the evidence that it does not.
+	 */
+	private static void setUpPickerScene(Minecraft mc) {
+		SchematicaState state = Schematica.STATE;
+		if (mc.world == null) {
+			Log.info("SMOKETEST: no world, skipping the picker scene");
+			return;
+		}
+
+		File file = new File(state.getSchematicDirectory(), "smoketest.schematic");
+		state.closeAll();
+		for (int i = 0; i < 2; i++) {
+			if (!state.openSchematic(file)) {
+				fail("openSchematic returned false setting up the picker scene", null);
+				return;
+			}
+			state.getActive().offset.set(baseX + i * (STRUCTURE_SIZE + 2), baseY, baseZ + STRUCTURE_SIZE + 2);
+			state.getActive().isRenderingSchematic = true;
+			state.getActive().needsUpdate = true;
+		}
+		state.setActiveIndex(0);
+		parkCamera(mc);
+
+		SchematicControlScreen control = new SchematicControlScreen();
+		mc.setScreen(control);
+
+		ButtonWidget picker = widgetNamed(control, "SchematicPickerWidget");
+		if (picker == null) {
+			fail("the move screen has no picker on it", null);
+			return;
+		}
+		clickButton(control, picker);
+
+		Log.info("SMOKETEST: scene " + scene + " - the move screen with " + state.getOpenCount()
+				+ " schematics open and the picker dropped");
 	}
 
 	/**
@@ -2105,10 +2284,10 @@ public final class SmokeTest {
 		// Centred on the camera and up in the air, so the world underneath is empty and every block
 		// draws as a ghost with a missing-block box over it - the heaviest thing the overlay does.
 		state.isRenderingGuide = false;
-		state.renderingLayer = -1;
-		state.offset.set(baseX + 2 - LARGE_WIDTH / 2, baseY + 2, baseZ - 9 - LARGE_LENGTH / 2);
-		state.isRenderingSchematic = true;
-		state.needsUpdate = true;
+		state.getActive().renderingLayer = -1;
+		state.getActive().offset.set(baseX + 2 - LARGE_WIDTH / 2, baseY + 2, baseZ - 9 - LARGE_LENGTH / 2);
+		state.getActive().isRenderingSchematic = true;
+		state.getActive().needsUpdate = true;
 
 		Log.info("SMOKETEST: scene " + scene + " - " + LARGE_WIDTH + "x" + LARGE_HEIGHT + "x" + LARGE_LENGTH
 				+ " schematic, " + solid + " blocks, " + file.length() + " bytes on disk");
@@ -2121,7 +2300,7 @@ public final class SmokeTest {
 	 */
 	private static void runOverlayUpdateTests() {
 		SchematicaState state = Schematica.STATE;
-		if (state.schematic == null) {
+		if (state.getActive().schematic == null) {
 			Log.info("SMOKETEST: no schematic loaded, skipping the overlay update checks");
 			return;
 		}
@@ -2135,39 +2314,39 @@ public final class SmokeTest {
 		checkTrue("nothing is waiting to be rebuilt to start with",
 				renderer != null && !renderer.isRebuilding());
 
-		int chunkX = state.offset.x >> 4;
-		int chunkZ = state.offset.z >> 4;
-		short[] corner = { packBlockChange(state.offset.x, state.offset.y, state.offset.z) };
+		int chunkX = state.getActive().offset.x >> 4;
+		int chunkZ = state.getActive().offset.z >> 4;
+		short[] corner = { packBlockChange(state.getActive().offset.x, state.getActive().offset.y, state.getActive().offset.z) };
 
 		state.onWorldBlocksChanged(chunkX, chunkZ, corner, 0);
 		checkTrue("a packet carrying no changes marks nothing",
-				!state.needsUpdate && !renderer.isRebuilding());
+				!state.getActive().needsUpdate && !renderer.isRebuilding());
 
 		state.onWorldBlocksChanged(chunkX + 8, chunkZ + 8, corner, 1);
 		checkTrue("blocks changing in a chunk the overlay is nowhere near leave it alone",
-				!state.needsUpdate && !renderer.isRebuilding());
+				!state.getActive().needsUpdate && !renderer.isRebuilding());
 
-		short[] above = { packBlockChange(state.offset.x, state.offset.y + 60, state.offset.z) };
+		short[] above = { packBlockChange(state.getActive().offset.x, state.getActive().offset.y + 60, state.getActive().offset.z) };
 		state.onWorldBlocksChanged(chunkX, chunkZ, above, 1);
 		checkTrue("nor do blocks in the right chunk but over the top of it",
-				!state.needsUpdate && !renderer.isRebuilding());
+				!state.getActive().needsUpdate && !renderer.isRebuilding());
 
 		state.onWorldBlocksChanged(chunkX, chunkZ, corner, 1);
 		checkTrue("a block under the overlay marks it for rebuilding", renderer.isRebuilding());
-		checkTrue("without invalidating all of it", !state.needsUpdate);
+		checkTrue("without invalidating all of it", !state.getActive().needsUpdate);
 
-		state.needsUpdate = false;
-		state.onWorldBlockChanged(state.offset.x + 1, state.offset.y + 1, state.offset.z + 1);
-		checkTrue("a block inside the overlay does not invalidate all of it", !state.needsUpdate);
+		state.getActive().needsUpdate = false;
+		state.onWorldBlockChanged(state.getActive().offset.x + 1, state.getActive().offset.y + 1, state.getActive().offset.z + 1);
+		checkTrue("a block inside the overlay does not invalidate all of it", !state.getActive().needsUpdate);
 
-		state.onWorldBlockChanged(state.offset.x - 50, state.offset.y, state.offset.z - 50);
-		checkTrue("a block outside the overlay invalidates nothing", !state.needsUpdate);
+		state.onWorldBlockChanged(state.getActive().offset.x - 50, state.getActive().offset.y, state.getActive().offset.z - 50);
+		checkTrue("a block outside the overlay invalidates nothing", !state.getActive().needsUpdate);
 
 		state.toggleRendering();
-		checkTrue("the toggle hides the schematic", !state.isRenderingSchematic);
+		checkTrue("the toggle hides the schematic", !state.getActive().isRenderingSchematic);
 		state.toggleRendering();
-		checkTrue("the toggle brings it back", state.isRenderingSchematic);
-		checkTrue("toggling keeps the cached geometry", !state.needsUpdate);
+		checkTrue("the toggle brings it back", state.getActive().isRenderingSchematic);
+		checkTrue("toggling keeps the cached geometry", !state.getActive().needsUpdate);
 
 		Log.info("SMOKETEST: --- overlay updates done ---");
 	}
@@ -2179,7 +2358,7 @@ public final class SmokeTest {
 	 */
 	private static void runChunkArrivalTests() {
 		SchematicaState state = Schematica.STATE;
-		if (state.schematic == null) {
+		if (state.getActive().schematic == null) {
 			Log.info("SMOKETEST: no schematic loaded, skipping the chunk arrival checks");
 			return;
 		}
@@ -2192,14 +2371,14 @@ public final class SmokeTest {
 		checkTrue("nothing is waiting to be rebuilt to start with",
 				renderer != null && !renderer.isRebuilding());
 
-		state.needsUpdate = false;
-		state.onWorldChunkLoaded(state.offset.x - 100, 0, state.offset.z - 100, 16, 128, 16);
+		state.getActive().needsUpdate = false;
+		state.onWorldChunkLoaded(state.getActive().offset.x - 100, 0, state.getActive().offset.z - 100, 16, 128, 16);
 		checkTrue("a chunk nowhere near the overlay leaves it alone",
-				!state.needsUpdate && !renderer.isRebuilding());
+				!state.getActive().needsUpdate && !renderer.isRebuilding());
 
-		state.onWorldChunkLoaded(state.offset.x, 0, state.offset.z, 16, 128, 16);
+		state.onWorldChunkLoaded(state.getActive().offset.x, 0, state.getActive().offset.z, 16, 128, 16);
 		checkTrue("a chunk the overlay stands in marks it for rebuilding", renderer.isRebuilding());
-		checkTrue("without invalidating all of it", !state.needsUpdate);
+		checkTrue("without invalidating all of it", !state.getActive().needsUpdate);
 
 		Log.info("SMOKETEST: --- chunks arriving done ---");
 	}
@@ -2216,40 +2395,155 @@ public final class SmokeTest {
 	 */
 	private static void runLayerTests() {
 		SchematicaState state = Schematica.STATE;
-		if (state.schematic == null) {
+		if (state.getActive().schematic == null) {
 			Log.info("SMOKETEST: no schematic loaded, skipping the layer checks");
 			return;
 		}
 
 		Log.info("SMOKETEST: --- layers ---");
 
-		int saved = state.renderingLayer;
+		int saved = state.getActive().renderingLayer;
 		int max = state.getMaxRenderingLayer();
 
 		state.setRenderingLayer(-1);
-		state.needsUpdate = false;
-		state.setRenderingLayer(state.renderingLayer + 1);
-		check("a layer step up leaves all-layers for the bottom one", state.renderingLayer, 0);
-		checkTrue("changing the layer invalidates the overlay", state.needsUpdate);
+		state.getActive().needsUpdate = false;
+		state.setRenderingLayer(state.getActive().renderingLayer + 1);
+		check("a layer step up leaves all-layers for the bottom one", state.getActive().renderingLayer, 0);
+		checkTrue("changing the layer invalidates the overlay", state.getActive().needsUpdate);
 
 		for (int i = 0; i <= max + 1; i++) {
-			state.setRenderingLayer(state.renderingLayer + 1);
+			state.setRenderingLayer(state.getActive().renderingLayer + 1);
 		}
-		check("stepping up stops at the top layer", state.renderingLayer, max);
+		check("stepping up stops at the top layer", state.getActive().renderingLayer, max);
 
-		state.needsUpdate = false;
-		state.setRenderingLayer(state.renderingLayer + 1);
-		checkTrue("a step past the top rebuilds nothing", !state.needsUpdate);
+		state.getActive().needsUpdate = false;
+		state.setRenderingLayer(state.getActive().renderingLayer + 1);
+		checkTrue("a step past the top rebuilds nothing", !state.getActive().needsUpdate);
 
 		for (int i = 0; i <= max + 1; i++) {
-			state.setRenderingLayer(state.renderingLayer - 1);
+			state.setRenderingLayer(state.getActive().renderingLayer - 1);
 		}
-		check("stepping down stops at all layers", state.renderingLayer, -1);
+		check("stepping down stops at all layers", state.getActive().renderingLayer, -1);
 
 		state.setRenderingLayer(saved);
-		check("the layer is back where it started", state.renderingLayer, saved);
+		check("the layer is back where it started", state.getActive().renderingLayer, saved);
 
 		Log.info("SMOKETEST: --- layers done ---");
+	}
+
+	/**
+	 * Several schematics open at once: that opening one keeps the others, that everything the move
+	 * screen does reaches only the one it is pointed at, and that the set has a bottom and a top.
+	 *
+	 * <p>Puts the scene back exactly as it found it on the way out, since the screenshots after
+	 * this are of the one schematic it started with.
+	 */
+	private static void runMultipleSchematicTests(Minecraft mc) {
+		SchematicaState state = Schematica.STATE;
+		if (state.getActive().schematic == null) {
+			Log.info("SMOKETEST: no schematic loaded, skipping the multiple schematic checks");
+			return;
+		}
+
+		Log.info("SMOKETEST: --- several schematics at once ---");
+
+		OpenSchematic first = state.getActive();
+		int savedX = first.offset.x;
+		int savedY = first.offset.y;
+		int savedZ = first.offset.z;
+		int savedLayer = first.renderingLayer;
+		int savedTurns = first.getTurns();
+		boolean savedMirrored = first.isMirrored();
+		boolean savedShowing = first.isRenderingSchematic;
+		File file = new File(state.getSchematicDirectory(), "smoketest.schematic");
+
+		check("one schematic is open to start with", state.getOpenCount(), 1);
+		checkTrue("and there is room for another", state.canOpenAnother());
+
+		if (!state.openSchematic(file)) {
+			fail("openSchematic returned false for a second copy", null);
+			return;
+		}
+
+		check("opening another keeps the first one", state.getOpenCount(), 2);
+		check("and points the controls at the new one", state.getActiveIndex(), 1);
+		checkTrue("the first one is still loaded", !state.getOpen().get(0).isEmpty());
+		check("and has not moved", state.getOpen().get(0).offset.x, savedX);
+
+		OpenSchematic second = state.getActive();
+		second.offset.set(savedX + 40, savedY, savedZ);
+		second.isRenderingSchematic = true;
+		second.setRenderingLayer(-1);
+
+		// Which schematic answers for a world position is the question easy place asks of the set,
+		// and the one that decides which build a click is building.
+		checkTrue("the schematic covering a position is the one standing there",
+				state.schematicAt(savedX, savedY, savedZ) == first);
+		checkTrue("and the other answers for its own ground",
+				state.schematicAt(second.offset.x, second.offset.y, second.offset.z) == second);
+		checkTrue("with neither answering for open sky",
+				state.schematicAt(savedX, savedY + 40, savedZ) == null);
+
+		state.rotateSchematic();
+		check("turning the active one leaves the other where it was",
+				state.getOpen().get(0).getTurns(), savedTurns);
+		check("and turns the active one", second.getTurns(), 1);
+		state.rotateSchematic();
+		state.rotateSchematic();
+		state.rotateSchematic();
+		check("and back round to where it started", second.getTurns(), 0);
+
+		state.setRenderingLayer(1);
+		check("slicing the active one leaves the other whole",
+				state.getOpen().get(0).renderingLayer, savedLayer);
+		check("and slices the active one", second.renderingLayer, 1);
+		second.setRenderingLayer(-1);
+
+		// The move screen's Hide button is pointed at one of them; the key is pointed at all of them.
+		second.toggleRendering();
+		checkTrue("hiding one leaves the rest being drawn", state.isAnyRendering());
+		state.toggleAllRendering();
+		checkTrue("the key hides every one of them", !state.isAnyRendering());
+		state.toggleAllRendering();
+		checkTrue("and brings them all back", state.isAnyRendering());
+		checkTrue("including the one that was hidden on its own", second.isRenderingSchematic);
+
+		while (state.getOpenCount() < SchematicaState.MAX_OPEN) {
+			if (!state.openSchematic(file)) {
+				fail("openSchematic refused below the cap, at " + state.getOpenCount(), null);
+				break;
+			}
+		}
+		check("as many as the cap allows can be open", state.getOpenCount(), SchematicaState.MAX_OPEN);
+		checkTrue("and no more are offered", !state.canOpenAnother());
+		checkTrue("opening one past the cap is refused", !state.openSchematic(file));
+		check("and nothing was opened by the refusal", state.getOpenCount(), SchematicaState.MAX_OPEN);
+
+		while (state.getOpenCount() > 1) {
+			state.setActiveIndex(state.getOpenCount() - 1);
+			state.closeActive();
+		}
+		check("closing them one by one leaves one", state.getOpenCount(), 1);
+		check("with the controls on it", state.getActiveIndex(), 0);
+		checkTrue("and it is the one that was open first", state.getActive() == first);
+		check("still standing where it was", state.getActive().offset.x, savedX);
+
+		state.closeActive();
+		check("closing the last one leaves the slot rather than nothing", state.getOpenCount(), 1);
+		checkTrue("with nothing in it", state.getActive().isEmpty());
+
+		// And back to the one schematic the scenes after this are of.
+		if (!state.loadSchematic(file)) {
+			fail("loadSchematic returned false putting the scene back", null);
+			return;
+		}
+		state.getActive().setOrientation(savedTurns, savedMirrored);
+		state.getActive().offset.set(savedX, savedY, savedZ);
+		state.getActive().setRenderingLayer(savedLayer);
+		state.getActive().isRenderingSchematic = savedShowing;
+		state.getActive().needsUpdate = true;
+
+		Log.info("SMOKETEST: --- several schematics at once done ---");
 	}
 
 	/**
@@ -2259,7 +2553,7 @@ public final class SmokeTest {
 	 */
 	private static void runEasyPlaceTests(Minecraft mc) {
 		SchematicaState state = Schematica.STATE;
-		if (state.schematic == null || mc.player == null) {
+		if (state.getActive().schematic == null || mc.player == null) {
 			Log.info("SMOKETEST: no schematic loaded, skipping the easy place checks");
 			return;
 		}
@@ -2270,16 +2564,16 @@ public final class SmokeTest {
 		PlayerInventory inventory = mc.player.inventory;
 
 		boolean savedMode = state.isEasyPlace;
-		int savedLayer = state.renderingLayer;
+		int savedLayer = state.getActive().renderingLayer;
 		int savedSlot = inventory.selectedSlot;
 		ItemStack[] savedHotbar = new ItemStack[HOTBAR_SIZE];
 		System.arraycopy(inventory.main, 0, savedHotbar, 0, HOTBAR_SIZE);
 		class_27 savedHit = mc.field_2823;
 
 		// The ghost is parked clear of the built structure, so its own space is free to write into.
-		int x = state.offset.x + 2;
-		int y = state.offset.y;
-		int z = state.offset.z + 2;
+		int x = state.getActive().offset.x + 2;
+		int y = state.getActive().offset.y;
+		int z = state.getActive().offset.z + 2;
 		int[][] touched = { { x, y, z }, { x - 1, y, z }, { x - 1, y + 1, z } };
 		int[] savedBlocks = new int[touched.length];
 		int[] savedMetadata = new int[touched.length];
@@ -2294,8 +2588,8 @@ public final class SmokeTest {
 			world.method_201(x, y, z, 0, 0);
 			world.method_201(x - 1, y, z, GOLD, 0);
 			world.method_201(x - 1, y + 1, z, 0, 0);
-			check("the schematic wants gold in the gap", state.schematic.getBlockId(2, 0, 2), GOLD);
-			check("the schematic wants nothing above it", state.schematic.getBlockId(1, 1, 2), 0);
+			check("the schematic wants gold in the gap", state.getActive().schematic.getBlockId(2, 0, 2), GOLD);
+			check("the schematic wants nothing above it", state.getActive().schematic.getBlockId(1, 1, 2), 0);
 
 			for (int slot = 0; slot < HOTBAR_SIZE; slot++) {
 				inventory.main[slot] = null;
@@ -2374,14 +2668,14 @@ public final class SmokeTest {
 			// The faster rate has to be tied to the same thing the click gate is. With nothing to
 			// build against, a mode that is still on must not leave the player placing at four times
 			// vanilla's speed everywhere else in the world.
-			state.isRenderingSchematic = false;
+			state.getActive().isRenderingSchematic = false;
 			check("no faster placing with the schematic hidden", (int) EasyPlace.useRepeatDivisor(4.0F), 4);
-			state.isRenderingSchematic = true;
+			state.getActive().isRenderingSchematic = true;
 
-			SchematicWorld loaded = state.schematic;
-			state.schematic = null;
+			SchematicWorld loaded = state.getActive().schematic;
+			state.getActive().schematic = null;
 			check("no faster placing with nothing loaded", (int) EasyPlace.useRepeatDivisor(4.0F), 4);
-			state.schematic = loaded;
+			state.getActive().schematic = loaded;
 
 			state.isEasyPlace = false;
 			check("and vanilla's rate is back when it is off", (int) EasyPlace.useRepeatDivisor(4.0F), 4);
@@ -2408,7 +2702,7 @@ public final class SmokeTest {
 	 * schematic back the way it found it.
 	 */
 	private static void runMetadataMatchTests(Minecraft mc) {
-		Schematic schematic = Schematica.STATE.schematic.getSchematic();
+		Schematic schematic = Schematica.STATE.getActive().schematic.getSchematic();
 		PlayerInventory inventory = mc.player.inventory;
 		int savedBlock = schematic.getBlockId(2, 0, 2);
 		int savedMetadata = schematic.getMetadata(2, 0, 2);
@@ -2438,7 +2732,7 @@ public final class SmokeTest {
 			schematic.setMetadata(2, 0, 2, savedMetadata);
 			inventory.main[GOLD_SLOT] = new ItemStack(GOLD, 64, 0);
 			inventory.selectedSlot = GOLD_SLOT;
-			Schematica.STATE.needsUpdate = true;
+			Schematica.STATE.getActive().needsUpdate = true;
 		}
 	}
 
@@ -2451,7 +2745,7 @@ public final class SmokeTest {
 	 * inventory and the schematic back the way it found them.
 	 */
 	private static void runRestockTests(Minecraft mc, int x, int y, int z) {
-		Schematic schematic = Schematica.STATE.schematic.getSchematic();
+		Schematic schematic = Schematica.STATE.getActive().schematic.getSchematic();
 		PlayerInventory inventory = mc.player.inventory;
 		ItemStack[] saved = new ItemStack[inventory.main.length];
 		System.arraycopy(inventory.main, 0, saved, 0, saved.length);
@@ -2517,7 +2811,7 @@ public final class SmokeTest {
 			System.arraycopy(saved, 0, inventory.main, 0, saved.length);
 			inventory.selectedSlot = GOLD_SLOT;
 			HotbarRestock.reset();
-			Schematica.STATE.needsUpdate = true;
+			Schematica.STATE.getActive().needsUpdate = true;
 		}
 	}
 
@@ -2640,7 +2934,7 @@ public final class SmokeTest {
 		}
 
 		try {
-			state.offset.set(pasteX, pasteY, pasteZ);
+			state.getActive().offset.set(pasteX, pasteY, pasteZ);
 			int dropped = world.method_174(net.minecraft.class_142.class);
 
 			SchematicPaste.write(world, state);
@@ -2667,7 +2961,7 @@ public final class SmokeTest {
 					}
 				}
 			}
-			state.needsUpdate = true;
+			state.getActive().needsUpdate = true;
 		}
 
 		Log.info("SMOKETEST: --- pasting what hangs on a wall done ---");
@@ -2751,7 +3045,7 @@ public final class SmokeTest {
 		}
 
 		try {
-			state.offset.set(pasteX, pasteY, pasteZ);
+			state.getActive().offset.set(pasteX, pasteY, pasteZ);
 
 			SchematicPaste.write(world, state);
 
@@ -2775,7 +3069,7 @@ public final class SmokeTest {
 					}
 				}
 			}
-			state.needsUpdate = true;
+			state.getActive().needsUpdate = true;
 		}
 
 		Log.info("SMOKETEST: --- pasting a piston that is out done ---");
@@ -2810,14 +3104,14 @@ public final class SmokeTest {
 	 */
 	private static void runPasteTests(Minecraft mc) {
 		SchematicaState state = Schematica.STATE;
-		if (state.schematic == null || mc.player == null) {
+		if (state.getActive().schematic == null || mc.player == null) {
 			Log.info("SMOKETEST: no schematic loaded, skipping the paste checks");
 			return;
 		}
 
 		Log.info("SMOKETEST: --- paste ---");
 		World world = mc.world;
-		Schematic schematic = state.schematic.getSchematic();
+		Schematic schematic = state.getActive().schematic.getSchematic();
 
 		// A plain dev run has no creative mode in it at all, since the mod that adds one is not
 		// installed; a run with BHCreative in it has one and is not in it. Both are a greyed-out
@@ -2833,10 +3127,10 @@ public final class SmokeTest {
 		int height = schematic.getHeight();
 		int length = schematic.getLength();
 
-		int savedX = state.offset.x;
-		int savedY = state.offset.y;
-		int savedZ = state.offset.z;
-		boolean savedUpdate = state.needsUpdate;
+		int savedX = state.getActive().offset.x;
+		int savedY = state.getActive().offset.y;
+		int savedZ = state.getActive().offset.z;
+		boolean savedUpdate = state.getActive().needsUpdate;
 
 		// Above the ghost and clear of the structure it was cut from, so nothing in this box belongs
 		// to anything else.
@@ -2866,7 +3160,7 @@ public final class SmokeTest {
 
 			check("the schematic wants nothing in the witness cell", schematic.getBlockId(1, 1, 1), 0);
 			world.method_201(pasteX + 1, pasteY + 1, pasteZ + 1, COBBLESTONE, 0);
-			state.offset.set(pasteX, pasteY, pasteZ);
+			state.getActive().offset.set(pasteX, pasteY, pasteZ);
 
 			// The button's own call, which has to refuse: without creative mode there is no paste.
 			check("pasting is refused with no creative mode to be in",
@@ -2944,8 +3238,8 @@ public final class SmokeTest {
 					}
 				}
 			}
-			state.offset.set(savedX, savedY, savedZ);
-			state.needsUpdate = savedUpdate;
+			state.getActive().offset.set(savedX, savedY, savedZ);
+			state.getActive().needsUpdate = savedUpdate;
 		}
 
 		runPasteButtonTests(mc, false);
@@ -2967,7 +3261,7 @@ public final class SmokeTest {
 	private static void runCreativePasteTests(Minecraft mc, int pasteX, int pasteY, int pasteZ, int wanted) {
 		SchematicaState state = Schematica.STATE;
 		World world = mc.world;
-		Schematic schematic = state.schematic.getSchematic();
+		Schematic schematic = state.getActive().schematic.getSchematic();
 
 		Log.info("SMOKETEST: --- paste, in creative mode ---");
 		if (!setCreative(mc, true)) {
@@ -3082,12 +3376,12 @@ public final class SmokeTest {
 		Log.info("SMOKETEST: --- coordinate entry ---");
 
 		SchematicaState state = Schematica.STATE;
-		Vec3i savedOffset = state.offset.copy();
+		Vec3i savedOffset = state.getActive().offset.copy();
 		Vec3i savedPointA = state.pointA.copy();
 		Vec3i savedPointB = state.pointB.copy();
 
 		// Set before the screen is built: the rows read their starting value as they are laid out.
-		state.offset.set(0, 4, 0);
+		state.getActive().offset.set(0, 4, 0);
 
 		SchematicControlScreen control = new SchematicControlScreen();
 		mc.setScreen(control);
@@ -3095,52 +3389,52 @@ public final class SmokeTest {
 		control.handleTab();
 		type(control, "a12b"); // letters never reach the field
 		pressKey(control, '\r', Keyboard.KEY_RETURN);
-		check("typed X offset", state.offset.x, 12);
+		check("typed X offset", state.getActive().offset.x, 12);
 
 		// Backspace rubs out one digit rather than the whole number. The field is showing an applied
 		// 12 and nothing is drawn as selected, so taking all of it away would look like it was eaten.
 		pressKey(control, '\b', Keyboard.KEY_BACK);
 		type(control, "5");
 		pressKey(control, '\r', Keyboard.KEY_RETURN);
-		check("backspace takes a digit off rather than the lot", state.offset.x, 15);
+		check("backspace takes a digit off rather than the lot", state.getActive().offset.x, 15);
 
 		// And once a digit has gone the next one still types onto the end rather than over it.
 		pressKey(control, '\b', Keyboard.KEY_BACK);
 		pressKey(control, '\b', Keyboard.KEY_BACK);
 		type(control, "40");
 		pressKey(control, '\r', Keyboard.KEY_RETURN);
-		check("backspacing the number away leaves an empty field to type into", state.offset.x, 40);
+		check("backspacing the number away leaves an empty field to type into", state.getActive().offset.x, 40);
 
 		// Nothing left to rub out, and Enter on an empty field keeps what was applied.
 		pressKey(control, '\b', Keyboard.KEY_BACK);
 		pressKey(control, '\b', Keyboard.KEY_BACK);
 		pressKey(control, '\b', Keyboard.KEY_BACK);
 		pressKey(control, '\r', Keyboard.KEY_RETURN);
-		check("and an empty field applied leaves the value alone", state.offset.x, 40);
+		check("and an empty field applied leaves the value alone", state.getActive().offset.x, 40);
 
 		type(control, "12");
 		pressKey(control, '\r', Keyboard.KEY_RETURN);
-		check("typing over an applied value still replaces it", state.offset.x, 12);
+		check("typing over an applied value still replaces it", state.getActive().offset.x, 12);
 
 		type(control, "999");
 		pressKey(control, (char) 27, Keyboard.KEY_ESCAPE);
-		check("escape abandons the edit", state.offset.x, 12);
+		check("escape abandons the edit", state.getActive().offset.x, 12);
 
 		// Escape also gave the field up, so the tab order starts from the top again.
 		control.handleTab();
 		control.handleTab();
 		type(control, "-5");
 		type(control, "\t"); // tab applies this row and moves to the next
-		check("typed Y offset", state.offset.y, -5);
+		check("typed Y offset", state.getActive().offset.y, -5);
 
 		type(control, "7");
 		pressKey(control, '\r', Keyboard.KEY_RETURN);
-		check("typed Z offset", state.offset.z, 7);
+		check("typed Z offset", state.getActive().offset.z, 7);
 
 		ButtonWidget increaseX = buttonAt(control, 2);
 		if (increaseX != null) {
 			clickButton(control, increaseX);
-			check("the + button still steps the coordinate", state.offset.x, 13);
+			check("the + button still steps the coordinate", state.getActive().offset.x, 13);
 		}
 
 		// The mouse route, which is how anyone actually gets into a field. The row's [-] button is
@@ -3150,7 +3444,7 @@ public final class SmokeTest {
 			clickAt(control, decreaseZ.x - 10, decreaseZ.y + 10);
 			type(control, "64");
 			clickAt(control, 2, 2);
-			check("clicking a value types into it, clicking away applies it", state.offset.z, 64);
+			check("clicking a value types into it, clicking away applies it", state.getActive().offset.z, 64);
 		}
 
 		// The same rows on the save screen, bound to the two corners instead.
@@ -3171,7 +3465,7 @@ public final class SmokeTest {
 		check("the selection followed the typed corner", state.pointMax.x, 20);
 
 		mc.setScreen(null);
-		state.offset.set(savedOffset.x, savedOffset.y, savedOffset.z);
+		state.getActive().offset.set(savedOffset.x, savedOffset.y, savedOffset.z);
 		state.pointA.set(savedPointA.x, savedPointA.y, savedPointA.z);
 		state.pointB.set(savedPointB.x, savedPointB.y, savedPointB.z);
 		state.updatePoints();
@@ -3191,10 +3485,10 @@ public final class SmokeTest {
 		}
 
 		SchematicControlScreen screen = (SchematicControlScreen) mc.currentScreen;
-		int before = Schematica.STATE.offset.x;
+		int before = Schematica.STATE.getActive().offset.x;
 		screen.handleTab();
 		type(screen, "-120");
-		checkTrue("a half-typed coordinate has not moved anything", Schematica.STATE.offset.x == before);
+		checkTrue("a half-typed coordinate has not moved anything", Schematica.STATE.getActive().offset.x == before);
 	}
 
 	private static void type(Screen screen, String text) {
@@ -3232,6 +3526,27 @@ public final class SmokeTest {
 			method.invoke(screen, button);
 		} catch (ReflectiveOperationException exception) {
 			fail("could not click a button on " + screen.getClass().getSimpleName(), exception);
+		}
+	}
+
+	/**
+	 * The first widget on a screen of a given class, by name. Which button a screen holds where is
+	 * not something a test should have to count, and the picker is the one widget on the move screen
+	 * that is not an ordinary button.
+	 */
+	private static ButtonWidget widgetNamed(Screen screen, String simpleName) {
+		try {
+			java.lang.reflect.Field field = Screen.class.getDeclaredField("buttons");
+			field.setAccessible(true);
+			for (Object button : (List<?>) field.get(screen)) {
+				if (button.getClass().getSimpleName().equals(simpleName)) {
+					return (ButtonWidget) button;
+				}
+			}
+			return null;
+		} catch (ReflectiveOperationException | RuntimeException exception) {
+			fail("could not look for a " + simpleName + " on " + screen.getClass().getSimpleName(), exception);
+			return null;
 		}
 	}
 
@@ -3351,7 +3666,7 @@ public final class SmokeTest {
 	 */
 	private static void runMidairTests(Minecraft mc, int x, int y, int z) {
 		SchematicaState state = Schematica.STATE;
-		Schematic schematic = state.schematic.getSchematic();
+		Schematic schematic = state.getActive().schematic.getSchematic();
 		World world = mc.world;
 		PlayerInventory inventory = mc.player.inventory;
 
@@ -3505,7 +3820,7 @@ public final class SmokeTest {
 			mc.field_2823 = savedHit;
 			mc.player.method_1341(savedPlayerX, savedPlayerY, savedPlayerZ, savedYaw, savedPitch);
 			HotbarRestock.reset();
-			state.needsUpdate = true;
+			state.getActive().needsUpdate = true;
 		}
 
 		Log.info("SMOKETEST: --- easy place in mid air done ---");

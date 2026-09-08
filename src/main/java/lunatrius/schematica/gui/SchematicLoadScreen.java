@@ -92,18 +92,26 @@ public class SchematicLoadScreen extends Screen {
 		super.render(mouseX, mouseY, delta);
 	}
 
+	/**
+	 * Opens the highlighted file alongside whatever is already open, and puts it in front of the
+	 * player - which is where a schematic nobody has said anything about yet belongs, and is the
+	 * only place it will not be standing inside one of the others.
+	 *
+	 * <p>Adding rather than replacing, since several can be open at once. The placeholder at the top
+	 * of the list still means nothing, and closes the schematic the controls are pointed at.
+	 */
 	private void loadSelected() {
 		int selected = this.state.selectedSchematic;
 
 		// Index 0 is the "-- No schematic --" placeholder.
 		if (selected <= 0 || selected >= this.entries.size()) {
 			this.state.selectedSchematic = 0;
-			this.state.clearSchematic();
+			this.state.closeActive();
 			return;
 		}
 
 		File file = new File(Schematica.getSchematicDirectory(), this.entries.get(selected));
-		if (this.state.loadSchematic(file)) {
+		if (this.state.openSchematic(file)) {
 			this.state.resetRenderingLayer();
 			this.state.moveHere();
 		} else {

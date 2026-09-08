@@ -98,7 +98,7 @@ public class SchematicaSettingsScreen extends Screen implements SliderWidget.Lis
 	 * already inflated - so a change has to invalidate it.
 	 */
 	private void applied() {
-		Schematica.STATE.needsUpdate = true;
+		Schematica.STATE.invalidateAll();
 		this.config.save();
 	}
 

@@ -8,22 +8,23 @@ Load an MCEdit `.schematic` file and it is drawn over the world as a ghost you c
 with colour-coded boxes showing what is missing or wrong. You can also select a region of the world
 and save it back out as a schematic. A material list says what the whole thing will take and counts
 down as you gather it, on a screen or in the corner of the screen while you build. In a creative
-single player world, one button builds the whole thing where it stands. What you had open is still
-open when you next log in, in the place you left it, for each world and server separately.
+single player world, one button builds the whole thing where it stands. Several schematics can be
+open at once, each standing in its own place. What you had open is still open when you next log in,
+in the place you left it, for each world and server separately.
 
 ## Using it
 
-| Key            | Controls entry        | Action                                        |
-| -------------- | --------------------- | --------------------------------------------- |
-| Numpad `/`     | Load Schematic        | Load a schematic                              |
-| Numpad `*`     | Save Selection        | Save the current selection                    |
-| Numpad `-`     | Move Schematic        | Move / rotate / mirror the loaded schematic   |
-| Numpad `+`     | Show/Hide Schematic   | Show or hide the loaded schematic             |
-| Numpad `.`     | Schematica Settings   | Open the settings screen                      |
-| Page Up        | Schematic Layer Up    | Show the next layer up                        |
-| Page Down      | Schematic Layer Down  | Show the next layer down                      |
-| Numpad `0`     | Easy Place            | Turn easy place on or off                     |
-| Numpad `5`     | Material List         | What the schematic is built out of             |
+| Key            | Controls entry        | Action                                          |
+| -------------- | --------------------- | ----------------------------------------------- |
+| Numpad `/`     | Load Schematic        | Open a schematic, alongside any already open     |
+| Numpad `*`     | Save Selection        | Save the current selection                      |
+| Numpad `-`     | Move Schematic        | Move / rotate / mirror one, and pick which      |
+| Numpad `+`     | Show/Hide Schematic   | Show or hide every open schematic               |
+| Numpad `.`     | Schematica Settings   | Open the settings screen                        |
+| Page Up        | Schematic Layer Up    | Show the next layer up                          |
+| Page Down      | Schematic Layer Down  | Show the next layer down                        |
+| Numpad `0`     | Easy Place            | Turn easy place on or off                       |
+| Numpad `5`     | Material List         | What the picked schematic is built out of       |
 
 Schematics live in `<game dir>/schematics`. The keys only work while you are in a world and no
 other screen is open. They are vanilla bindings, stored in `options.txt` rather than in the mod's
@@ -40,22 +41,54 @@ Mod Menu installed.
 Hiding and showing keeps the cached geometry, so the toggle key is instant whatever the schematic
 costs to draw.
 
+### Several at once
+
+Up to eight schematics can be open together, each standing wherever you put it, and all of them are
+drawn. A build is rarely one file: the farm and the roof that goes over it are two, and the tower
+you are half way through is a third.
+
+Loading adds one rather than swapping the last one out. The picker along the top of the move screen
+is where the set is: it names the schematic the screen is pointed at and how many there are, and
+clicking it drops a list of all of them - numbered, the one you are on in yellow, the ones you have
+hidden in grey. Beside it, **Open...** goes to the load screen and **Close** takes the one you are
+on away. Loading past eight is refused and the button greys out until you close one.
+
+Everything else on that screen is about the one schematic the picker is on: where it stands, which
+way it is turned, which layer of it is showing, whether it is drawn at all, the material list and
+the paste. Two schematics can be sliced to different courses and turned different ways at once, and
+neither knows about the other.
+
+Three things are deliberately about the whole set instead:
+
+- **The show/hide key** hides all of them, and brings all of them back. It is the key you reach for
+  when the ghosts are in the way of what you have built, and half of them going is no use then. The
+  move screen's **Hide** button is the one that hides a single schematic.
+- **Easy place** builds whichever schematic you are aiming at, so you can work on two at once
+  without going back to a screen between them. Where two overlap, the one the picker is on wins.
+- **Taking blocks off the hotbar** counts every open schematic, since the next click may want back
+  a slot holding something from the build next door.
+
+The **-- No schematic --** entry at the top of the load list still means nothing, and closes the one
+you are on - the same thing the **Close** button does.
+
 ### Picking up where you left off
 
-A schematic you had open is still open when you come back to it. Log off, shut the game down, come
-back a week later: the ghost is standing where you left it, turned the way you turned it and sliced
-to the layer you were working on - or hidden, if that is how you left it.
+Whatever you had open is still open when you come back to it. Log off, shut the game down, come back
+a week later: the ghosts are standing where you left them, turned the way you turned them and sliced
+to the layers you were working on - or hidden, if that is how you left them. All of them come back,
+in the order you opened them, with the picker on the one it was on.
 
 Each world remembers its own, because a schematic pinned to a corner of one world means nothing in
 another. A single player world is told apart by its save folder and a server by the address you
 dialled, and the dimension counts as well - a build sits at coordinates in the overworld that are
 somewhere else entirely in the Nether, so the two ends of a portal keep separate notes.
 
-Closing the schematic is what forgets it, using the same **-- No schematic --** entry at the top of
-the load list you would use anyway. The note is kept up to date as you build rather than written
-only on the way out, so a game that is killed rather than closed still remembers. Notes live in
-`config/schematica-worlds.properties`, keyed by world; deleting a world's lines by hand forgets it
-too.
+Closing a schematic is what forgets that one, using the **Close** button you would use anyway. The
+note is kept up to date as you build rather than written only on the way out, so a game that is
+killed rather than closed still remembers. Notes live in `config/schematica-worlds.properties`,
+keyed by world and then by which schematic in it; deleting a world's lines by hand forgets it too. A
+file written by a version that could only hold one schematic per world is still read, as the first
+of a set.
 
 The overlay compares the schematic against the world, so it is only ever as good as the world was
 when it was built - and a world does not always say when it changes. A single player world is
@@ -84,9 +117,10 @@ overlay is cheap enough to fly around in.
 
 ### Material list
 
-Everything the loaded schematic is built out of, in one list: what it takes, how much of it you are
+Everything the picked schematic is built out of, in one list: what it takes, how much of it you are
 carrying and how much is still to be found. The **Materials** button on the move screen and Numpad
-`5` both open it.
+`5` both open it. With several open it is the one the picker is on that is counted, so the list
+follows what you are working on.
 
 The rows are the items you would go and fetch rather than the blocks the schematic holds, so a wall
 of redstone wire asks for redstone dust, a door asks for one door rather than its two halves, water
@@ -212,7 +246,8 @@ round trip and a retry, never an item.
 ### Pasting it into the world
 
 The **Paste** button on the move screen writes the whole schematic into the world where the ghost is
-standing. Everything the overlay was drawing is simply there.
+standing. Everything the overlay was drawing is simply there. It pastes the one the picker is on,
+like everything else on that screen, so several open schematics go down one at a time.
 
 It is offered in a single player world, in creative mode, and nowhere else. On a server the world
 you are drawing on is not yours to write into - blocks put into the client's copy of it would be a
@@ -302,6 +337,12 @@ blocks, and the coloured boxes over them. Three things follow from that:
   nearest-to-camera first, and picks the rest up next frame. The overlay refreshes visibly rather
   than freezing the game.
 
+That 8 ms is the whole frame's budget, not each schematic's. The dirty regions of everything open go
+into one queue sorted by distance from the camera, so the work in front of you is done first
+whichever build it belongs to, and a frame costs the same whether that work came from one schematic
+or six. Culling is shared the same way: the view planes are read once, in world coordinates, and
+every schematic is tested against them wherever it happens to be standing.
+
 Regions that fall outside the current layer slice, and cells the schematic leaves empty, are skipped
 before any of the expensive per-block work happens.
 
@@ -390,11 +431,13 @@ gui/         AxisScreen          routes clicks, keys and the tab order to the fo
              MaterialListScreen    what the schematic takes, against what is in the pack
              MaterialListWidget    one row of it: the icon, the name and the two counts
              InfoHud               the same list in the corner of the screen, while playing
+             SchematicPickerWidget which of the open schematics the move screen is pointed at
              four more Screens and a slider widget
 compat/      ModMenuIntegration  optional, loaded only when Mod Menu asks for it
              CreativeMode        optional, asks BHCreative whether the player is in creative mode
 mixin/       eight small hooks (see below)
-SchematicaState    everything about the current session
+SchematicaState    everything about the current session: the open schematics, and which is picked
+OpenSchematic      one of them: what it is, where it stands, how it is turned and what is drawn
 SchematicaConfig   the render settings, and the keybinds it hands to vanilla
 EasyPlace          what a right click is allowed to do while easy place is on
 HotbarRestock      brings a block onto the hotbar, and waits for the server to agree
@@ -445,10 +488,14 @@ Behaviour is otherwise the same as 1.2.0.10; these are deliberate changes:
 - **A material list.** The original drew a schematic and left working out what it would take to
   build entirely to you. This counts it, in the items you would go and fetch, and counts your
   inventory against it - on a screen, or in a HUD in the corner listing only what is still short.
+- **Several schematics can be open at once.** The original held one: loading a second closed the
+  first, so working on a build made of two files meant swapping between them and putting each one
+  back by hand every time. Up to eight are open here, all drawn, each in its own place and sliced to
+  its own course, with a picker on the move screen choosing which one the controls are pointed at.
 - **What was open is remembered per world.** The original loaded nothing on its own: every session
   started empty, and putting a schematic back where it had been was done by hand from the numbers
   you had written down. This writes the note itself, one per save folder, server address and
-  dimension.
+  dimension, and the note holds everything that was open rather than one of them.
 - **Rotate and mirror move block entities.** The original left signs and chests at their old
   coordinates after a transform.
 - **A fresh dimension backs `SchematicWorld`.** The original passed the live world's dimension to
@@ -551,6 +598,17 @@ for real and the HUD asked what it would draw, which is what joins the two halve
 screenshot of it over the world and scene 9 one of it behind an open screen, since whether it draws
 is not something the checks can say.
 
+Several schematics at once is checked as a set rather than as a screen. A second is opened and the
+first asserted to be still loaded and still where it was; each is asked which of them answers for a
+given position, which is the question easy place puts to the set; and turning one, slicing one and
+hiding one are each checked to have reached that one and nothing else. The show/hide key is checked
+to take all of them and bring all of them back, including one that had been hidden on its own. Then
+the cap is filled to the last slot, the one past it refused, and the set closed down one at a time
+back to the single empty slot a session starts with - which is the state the rest of the run needs,
+so the check and the tidying up are the same thing. Scene 16 is a screenshot of the move screen with
+two open and the picker dropped over it, since whether the list draws over the buttons it covers or
+under them is not something a check can say.
+
 Remembering what was open is checked from both ends. The name the mod gave the test world on its own
 is asserted to be the folder that world was started from, and on a server the address the connect
 screen was handed, since only a real join can answer for either. The rest is driven by hand, because
@@ -558,7 +616,13 @@ one run of the game cannot really log off and come back: a schematic is left ope
 not found in another, the file is read back off disk the way a freshly started game reads it, a
 schematic moved while playing is checked to have been written down where it stopped, a hand-written
 file says the overworld gets the overworld note and not the Nether one, and closing the schematic is
-checked to forget it. One world in the set is left deliberately silent - named and then never
+checked to forget it. A world left holding three of them is checked to come back holding all three,
+in the order they were opened, each in its own place and slice, with the picker on the one it was
+on, and closing one is checked to forget that one and no more. The shape of the file gets a check of
+its own against a server address with four numbers in it, since each schematic is written under the
+number of its place in the world and a world named by an address is already full of dots and ends in
+a number: both the old one-schematic line and a pair of new ones are read back from that address by
+hand. One world in the set is left deliberately silent - named and then never
 announced as ready, the way a world arrives when another mod has got to the swap first - and it is
 checked to be worked out anyway, to give up waiting rather than wait forever, and to be written down
 like any other; every other check says the announcement out loud, which is how a pack that swallowed

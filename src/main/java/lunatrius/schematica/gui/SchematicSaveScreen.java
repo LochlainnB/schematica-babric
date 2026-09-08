@@ -99,7 +99,8 @@ public class SchematicSaveScreen extends AxisScreen {
 			this.state.isRenderingGuide = !this.state.isRenderingGuide;
 			this.btnEnable.text = this.enableButtonLabel();
 			this.btnSave.active = this.state.isRenderingGuide;
-			this.state.needsUpdate = true;
+			// Nothing to invalidate: the guide is a dozen edges drawn straight every frame, and the
+			// cached geometry it used to be lumped in with belongs to the schematics instead.
 		} else if (button == this.btnSave) {
 			this.save();
 		}

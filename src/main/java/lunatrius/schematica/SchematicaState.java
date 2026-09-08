@@ -10,51 +10,56 @@ import java.util.Locale;
 import lunatrius.schematica.render.SchematicRenderer;
 import lunatrius.schematica.schematic.Schematic;
 import lunatrius.schematica.schematic.SchematicFormat;
-import lunatrius.schematica.schematic.SchematicWorld;
 import lunatrius.schematica.util.Log;
 import lunatrius.schematica.util.Translations;
 import lunatrius.schematica.util.Vec3f;
 import lunatrius.schematica.util.Vec3i;
 import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.class_13;
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.world.World;
 
 /**
- * Everything the mod knows about the current session: the loaded schematic, where it sits in the
- * world, the selection used for saving, and the render toggles the GUIs drive.
+ * Everything the mod knows about the current session: the schematics that are open, where each one
+ * sits in the world, the selection used for saving, and the render toggles the GUIs drive.
+ *
+ * <p>Several schematics can be open at once and all of them are drawn. One of them is the active
+ * one - what the move screen's controls are pointed at, what the material list counts, and what a
+ * paste writes - and the picker at the top of that screen is how it is chosen. Everything that is
+ * about a single build lives in {@link OpenSchematic}; what is left here is either about the player
+ * (where the camera is, which way it faces), about the save selection, or about the set as a whole.
+ *
+ * <p>There is always at least one slot, empty or not, so "no schematic" is a slot with nothing in
+ * it rather than a list with nothing in it. {@link #getActive()} therefore always has something to
+ * return, and the screens ask that whether one schematic is open or six.
  */
 public class SchematicaState {
 	/** Offsets the +/- buttons in the GUIs cycle through. */
 	public final int[] increments = { 1, 5, 15, 50, 250 };
 
-	/** Below this volume a freshly loaded schematic is shown in full rather than layer by layer. */
-	private static final int LAYER_MODE_VOLUME_THRESHOLD = 125000;
+	/**
+	 * How many schematics may be open at once.
+	 *
+	 * <p>A cap rather than none of them: each open schematic holds its blocks in memory and a run
+	 * of display lists in the driver, and the picker that chooses between them has to fit on the
+	 * screen next to everything else the move screen draws. Eight is more than a build has ever
+	 * needed and still fits both.
+	 */
+	public static final int MAX_OPEN = 8;
 
-	public SchematicWorld schematic = null;
-	/** Name of the file it was read from, so the same one can be found again next session. */
-	private String loadedName = null;
-	public class_13 blockRenderer = null;
+	/** The open schematics, in the order they were opened. Never empty; entries may be. */
+	private final List<OpenSchematic> open = new ArrayList<>();
+	/** Handed out by {@link #getOpen()}, which the renderer asks for twice a frame. */
+	private final List<OpenSchematic> openView = Collections.unmodifiableList(this.open);
+
+	/** Which of {@link #open} the controls are pointed at. Always a valid index. */
+	private int active = 0;
 
 	/** Camera position, interpolated for the current frame. */
 	public final Vec3f playerPosition = new Vec3f();
 	/** Which of the four cardinal directions the player faces, 0-3. */
 	public int rotationRender = 0;
-
-	/** World position the schematic's minimum corner is pinned to. */
-	public final Vec3i offset = new Vec3i();
-
-	/**
-	 * How the loaded schematic has been turned since it came off disk: quarter turns about Y, and
-	 * whether it was flipped before them.
-	 *
-	 * <p>Any run of rotations and mirrors lands on one of these eight, so this pair is enough to put
-	 * a schematic back the way it was left without replaying the clicks that got it there.
-	 */
-	private int turns = 0;
-	private boolean mirrored = false;
 
 	/** The two corners of the save selection. */
 	public final Vec3i pointA = new Vec3i();
@@ -64,25 +69,18 @@ public class SchematicaState {
 
 	public int selectedSchematic = 0;
 
-	/** -1 renders every layer, otherwise only the given Y slice. */
-	public int renderingLayer = -1;
-	public boolean isRenderingSchematic = false;
 	public boolean isRenderingGuide = false;
 
 	/**
-	 * Easy place: a right click may only put down the block the schematic wants where it wants it.
-	 * Session state rather than a setting, like the render toggles above - it is a mode the player
-	 * steps in and out of while building, not something to come back to a week later.
+	 * Easy place: a right click may only put down the block a schematic wants where it wants it.
+	 * Session state rather than a setting, like the render toggles - it is a mode the player steps
+	 * in and out of while building, not something to come back to a week later.
 	 */
 	public boolean isEasyPlace = false;
 
-	/** Set whenever the cached geometry is stale and must be rebuilt next frame. */
-	public boolean needsUpdate = true;
-
-	/** What the loaded schematic is built out of, counted on demand and kept until it changes. */
-	private MaterialList materials = null;
-	/** The schematic {@link #materials} was counted from, so a different one is noticed. */
-	private Schematic materialsCountedFrom = null;
+	public SchematicaState() {
+		this.open.add(new OpenSchematic());
+	}
 
 	public Minecraft getMinecraft() {
 		return Schematica.getMinecraft();
@@ -92,7 +90,243 @@ public class SchematicaState {
 		return Schematica.getSchematicDirectory();
 	}
 
-	// --- schematic files ---------------------------------------------------------------------
+	// --- the open schematics -------------------------------------------------------------------
+
+	/** Every open slot, in the order they were opened. Read-only; use the methods below to change. */
+	public List<OpenSchematic> getOpen() {
+		return this.openView;
+	}
+
+	/** The one the controls are pointed at. Never null - an empty slot is still a slot. */
+	public OpenSchematic getActive() {
+		return this.open.get(this.active);
+	}
+
+	public int getActiveIndex() {
+		return this.active;
+	}
+
+	/** Points the controls at another slot. Out of range values are ignored rather than clamped. */
+	public void setActiveIndex(int index) {
+		if (index >= 0 && index < this.open.size()) {
+			this.active = index;
+		}
+	}
+
+	/** How many slots there are, empty ones included. */
+	public int getOpenCount() {
+		return this.open.size();
+	}
+
+	/** How many of them actually hold a schematic. */
+	public int getLoadedCount() {
+		int count = 0;
+		for (OpenSchematic schematic : this.open) {
+			if (!schematic.isEmpty()) {
+				count++;
+			}
+		}
+		return count;
+	}
+
+	/** Whether another schematic can be opened without closing one first. */
+	public boolean canOpenAnother() {
+		return this.getActive().isEmpty() || this.open.size() < MAX_OPEN;
+	}
+
+	/**
+	 * Whether any open schematic is being drawn, which is what the show/hide key asks before
+	 * deciding which way to go.
+	 */
+	public boolean isAnyRendering() {
+		for (OpenSchematic schematic : this.open) {
+			if (schematic.schematic != null && schematic.isRenderingSchematic) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * The schematic that has something to say about a world position: the one covering it, active
+	 * first, and only ones being drawn.
+	 *
+	 * <p>Active first because two schematics may be standing in the same place - the same build
+	 * loaded twice while it is being lined up - and the one the controls are pointed at is the one
+	 * the player is working on. Hidden ones are skipped for the same reason easy place is off while
+	 * the overlay is hidden: what is not drawn is not being built.
+	 */
+	public OpenSchematic schematicAt(int x, int y, int z) {
+		OpenSchematic active = this.getActive();
+		if (active.isRenderingSchematic && active.covers(x, y, z)) {
+			return active;
+		}
+
+		for (OpenSchematic schematic : this.open) {
+			if (schematic.isRenderingSchematic && schematic.covers(x, y, z)) {
+				return schematic;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Opens a schematic alongside whatever is already open and points the controls at it. The
+	 * active slot is used when it is empty, so opening one thing into an empty world does not leave
+	 * a spare slot behind it; otherwise a slot is added.
+	 *
+	 * @return false when the file would not load, or when {@link #MAX_OPEN} are already open.
+	 */
+	public boolean openSchematic(File file) {
+		if (this.getActive().isEmpty()) {
+			return this.loadSchematic(file);
+		}
+		if (this.open.size() >= MAX_OPEN) {
+			Log.warn("Already holding " + MAX_OPEN + " schematics; close one before opening " + file.getName());
+			return false;
+		}
+
+		int previous = this.active;
+		this.open.add(new OpenSchematic());
+		this.active = this.open.size() - 1;
+		if (this.loadSchematic(file)) {
+			return true;
+		}
+
+		// It never loaded, so the slot it was given is an empty one nobody asked for, and the
+		// controls go back to whatever they were on rather than to whatever is left at the end.
+		this.open.remove(this.open.size() - 1);
+		this.active = previous;
+		return false;
+	}
+
+	/**
+	 * Loads a schematic into the active slot, replacing whatever was in it. This is the one that
+	 * moves nothing else around: {@link #openSchematic} is what a player asking for another
+	 * schematic gets.
+	 */
+	public boolean loadSchematic(File file) {
+		World world = this.getMinecraft().world;
+		if (world == null) {
+			return false;
+		}
+		return this.getActive().load(world, file);
+	}
+
+	/** Empties the active slot without taking it away. */
+	public void clearSchematic() {
+		this.getActive().close();
+	}
+
+	/**
+	 * Closes the active slot and points the controls at whatever takes its place - the next one
+	 * along, or the one before it when what was closed was last in the set. Closing the only one
+	 * leaves an empty slot rather than nothing, because the controls have to point somewhere.
+	 */
+	public void closeActive() {
+		if (this.open.size() <= 1) {
+			this.getActive().close();
+			return;
+		}
+
+		this.open.remove(this.active);
+		if (this.active >= this.open.size()) {
+			this.active = this.open.size() - 1;
+		}
+	}
+
+	/** Closes every schematic, leaving the one empty slot a fresh session starts with. */
+	public void closeAll() {
+		for (OpenSchematic schematic : this.open) {
+			schematic.close();
+		}
+		this.open.clear();
+		this.open.add(new OpenSchematic());
+		this.active = 0;
+	}
+
+	/** Marks every open schematic for a full rebuild. */
+	public void invalidateAll() {
+		for (OpenSchematic schematic : this.open) {
+			schematic.needsUpdate = true;
+		}
+	}
+
+	// --- what the controls do to the active schematic ------------------------------------------
+
+	/** The file the active schematic came from, or null with nothing in the slot. */
+	public String getLoadedName() {
+		return this.getActive().getLoadedName();
+	}
+
+	public MaterialList getMaterials() {
+		return this.getActive().getMaterials();
+	}
+
+	/** Recounts the pack against the active schematic's list, which is the half of it that moves. */
+	public void countMaterials() {
+		Minecraft mc = this.getMinecraft();
+		PlayerEntity player = mc == null ? null : mc.player;
+		this.getActive().countMaterials(player == null ? null : player.inventory.main);
+	}
+
+	/** Places the active schematic in front of the player, aligned to the way they are facing. */
+	public void moveHere() {
+		this.getActive().moveHere(this.playerPosition, this.rotationRender);
+	}
+
+	public void toggleRendering() {
+		this.getActive().toggleRendering();
+	}
+
+	/**
+	 * Shows or hides every open schematic at once: hides them all if any one of them is showing,
+	 * and otherwise brings all of them back.
+	 *
+	 * <p>What the key does, as against the move screen's Hide button, which is pointed at one
+	 * schematic like the rest of that screen. The key is the one you reach for when the ghosts are
+	 * in the way of seeing what you have built, and half of them going is no use then.
+	 */
+	public void toggleAllRendering() {
+		boolean show = !this.isAnyRendering();
+		for (OpenSchematic schematic : this.open) {
+			schematic.isRenderingSchematic = show && schematic.schematic != null;
+		}
+	}
+
+	public void mirrorSchematic() {
+		this.getActive().mirrorSchematic();
+	}
+
+	public void rotateSchematic() {
+		this.getActive().rotateSchematic();
+	}
+
+	public int getTurns() {
+		return this.getActive().getTurns();
+	}
+
+	public boolean isMirrored() {
+		return this.getActive().isMirrored();
+	}
+
+	public void setOrientation(int turns, boolean mirrored) {
+		this.getActive().setOrientation(turns, mirrored);
+	}
+
+	public void resetRenderingLayer() {
+		this.getActive().resetRenderingLayer();
+	}
+
+	public int getMaxRenderingLayer() {
+		return this.getActive().getMaxRenderingLayer();
+	}
+
+	public void setRenderingLayer(int layer) {
+		this.getActive().setRenderingLayer(layer);
+	}
+
+	// --- schematic files -----------------------------------------------------------------------
 
 	/**
 	 * The entries shown in the load list: index 0 is the "no schematic" placeholder, the rest are
@@ -113,57 +347,6 @@ public class SchematicaState {
 		}
 
 		return names;
-	}
-
-	public boolean loadSchematic(File file) {
-		World world = this.getMinecraft().world;
-		if (world == null) {
-			return false;
-		}
-
-		try {
-			SchematicFormat.LoadResult result = SchematicFormat.read(file);
-			this.schematic = new SchematicWorld(world, result.schematic);
-			this.blockRenderer = new class_13(this.schematic);
-			this.loadedName = file.getName();
-			this.turns = 0;
-			this.mirrored = false;
-			this.isRenderingSchematic = true;
-			this.needsUpdate = true;
-			this.invalidateMaterials();
-
-			Log.info("Loaded " + file.getName() + " ("
-					+ result.schematic.getWidth() + "x" + result.schematic.getHeight() + "x" + result.schematic.getLength() + ")");
-			if (result.droppedBlocks > 0) {
-				Log.warn(result.droppedBlocks + " block(s) in " + file.getName()
-						+ " do not exist in Beta 1.7.3 and were left empty.");
-			}
-			return true;
-		} catch (IOException | RuntimeException exception) {
-			Log.error("Failed to load schematic " + file.getName(), exception);
-			this.clearSchematic();
-			return false;
-		}
-	}
-
-	public void clearSchematic() {
-		this.schematic = null;
-		this.loadedName = null;
-		this.turns = 0;
-		this.mirrored = false;
-		this.blockRenderer = null;
-		this.isRenderingSchematic = false;
-		this.renderingLayer = -1;
-		this.needsUpdate = true;
-		this.invalidateMaterials();
-	}
-
-	/**
-	 * The file the loaded schematic came from, or null with nothing loaded. Only the name, not the
-	 * path: it is looked up in the schematics folder again, so moving the folder keeps working.
-	 */
-	public String getLoadedName() {
-		return this.loadedName;
 	}
 
 	/**
@@ -231,57 +414,7 @@ public class SchematicaState {
 		}
 	}
 
-	// --- materials ---------------------------------------------------------------------------
-
-	/**
-	 * What the loaded schematic is built out of.
-	 *
-	 * <p>Kept rather than counted per call: the count is a walk of every block in the schematic,
-	 * and both the material list screen and the info HUD ask for it many times a second. Only
-	 * loading, clearing or turning a schematic can change the answer, and each of those drops it.
-	 */
-	public MaterialList getMaterials() {
-		Schematic loaded = this.schematic == null ? null : this.schematic.getSchematic();
-		if (this.materials == null || this.materialsCountedFrom != loaded) {
-			this.materials = MaterialList.of(loaded);
-			this.materialsCountedFrom = loaded;
-		}
-		return this.materials;
-	}
-
-	/** Recounts the pack against the list, which is the half of it that moves. */
-	public void countMaterials() {
-		Minecraft mc = this.getMinecraft();
-		PlayerEntity player = mc == null ? null : mc.player;
-		this.getMaterials().countInventory(player == null ? null : player.inventory.main);
-	}
-
-	/**
-	 * Drops the counted list so the next look at it counts again.
-	 *
-	 * <p>Turning a schematic cannot really change what it is built out of - only orientation
-	 * metadata moves, and no two stacks of one item differ by orientation - but a rotation already
-	 * rebuilds the whole overlay, so counting again costs nothing next to what it is doing anyway
-	 * and does not rest on that staying true.
-	 */
-	private void invalidateMaterials() {
-		this.materials = null;
-		this.materialsCountedFrom = null;
-	}
-
-	// --- placement ---------------------------------------------------------------------------
-
-	public float getTranslationX() {
-		return this.playerPosition.x - this.offset.x;
-	}
-
-	public float getTranslationY() {
-		return this.playerPosition.y - this.offset.y;
-	}
-
-	public float getTranslationZ() {
-		return this.playerPosition.z - this.offset.z;
-	}
+	// --- the save selection --------------------------------------------------------------------
 
 	public void updatePoints() {
 		this.pointMin.set(
@@ -292,7 +425,6 @@ public class SchematicaState {
 				Math.max(this.pointA.x, this.pointB.x),
 				Math.max(this.pointA.y, this.pointB.y),
 				Math.max(this.pointA.z, this.pointB.z));
-		this.needsUpdate = true;
 	}
 
 	/** Drops a selection corner at the block the player is standing on, nudged away from them. */
@@ -310,37 +442,6 @@ public class SchematicaState {
 		}
 	}
 
-	/** Places the schematic in front of the player, aligned to the direction they are facing. */
-	public void moveHere() {
-		this.offset.set(
-				(int) Math.floor(this.playerPosition.x),
-				(int) Math.floor(this.playerPosition.y) - 1,
-				(int) Math.floor(this.playerPosition.z));
-
-		if (this.schematic == null) {
-			this.needsUpdate = true;
-			return;
-		}
-
-		switch (this.rotationRender) {
-			case 0: this.offset.x -= this.schematic.getWidth(); this.offset.z++; break;
-			case 1: this.offset.x -= this.schematic.getWidth(); this.offset.z -= this.schematic.getLength(); break;
-			case 2: this.offset.x++; this.offset.z -= this.schematic.getLength(); break;
-			default: this.offset.x++; this.offset.z++; break;
-		}
-
-		this.needsUpdate = true;
-	}
-
-	/**
-	 * Shows or hides the overlay. Deliberately does not invalidate anything: the renderer keeps its
-	 * cached geometry while the schematic is hidden and carries on marking it stale as the world
-	 * changes, so this is free in both directions however large the schematic is.
-	 */
-	public void toggleRendering() {
-		this.isRenderingSchematic = !this.isRenderingSchematic && this.schematic != null;
-	}
-
 	/**
 	 * Turns easy place on or off. Allowed with nothing loaded: without a schematic the mode simply
 	 * has nothing to hold clicks against, and it is still the mode the player asked for.
@@ -349,152 +450,22 @@ public class SchematicaState {
 		this.isEasyPlace = !this.isEasyPlace;
 	}
 
-	public void mirrorSchematic() {
-		if (this.schematic != null) {
-			this.schematic.getSchematic().mirrorZ();
-			this.schematic.refreshBlockEntities();
-			// Flipping something already turned is the same as turning the flip the other way, which
-			// is what keeps the pair down to one flip and a count of turns however long the run gets.
-			this.turns = (4 - this.turns) & 3;
-			this.mirrored = !this.mirrored;
-			this.needsUpdate = true;
-			this.invalidateMaterials();
-		}
-	}
+	// --- the world underneath ------------------------------------------------------------------
 
-	public void rotateSchematic() {
-		if (this.schematic != null) {
-			this.schematic.getSchematic().rotate();
-			this.schematic.refreshBlockEntities();
-			this.turns = (this.turns + 1) & 3;
-			this.needsUpdate = true;
-			this.invalidateMaterials();
-		}
-	}
-
-	/** Quarter turns applied since the schematic was loaded, 0-3. */
-	public int getTurns() {
-		return this.turns;
-	}
-
-	/** Whether the schematic was flipped before those turns. */
-	public boolean isMirrored() {
-		return this.mirrored;
-	}
-
-	/**
-	 * Turns a schematic to the orientation a {@link #getTurns} and {@link #isMirrored} pair
-	 * describes: the flip first, then the turns.
-	 *
-	 * <p>Meant for a schematic straight off disk, which is the only state the pair is measured
-	 * against. Calling it on one that has already been turned turns it again from where it is.
-	 */
-	public void setOrientation(int turns, boolean mirrored) {
-		if (this.schematic == null) {
-			return;
-		}
-
-		if (mirrored) {
-			this.schematic.getSchematic().mirrorZ();
-		}
-		for (int turn = 0; turn < (turns & 3); turn++) {
-			this.schematic.getSchematic().rotate();
-		}
-
-		this.schematic.refreshBlockEntities();
-		this.turns = turns & 3;
-		this.mirrored = mirrored;
-		this.needsUpdate = true;
-		this.invalidateMaterials();
-	}
-
-	/** Picks a sensible initial layer mode for a schematic that has just been loaded. */
-	public void resetRenderingLayer() {
-		this.renderingLayer = -1;
-		if (this.schematic != null && this.schematic.getSchematic().getVolume() > LAYER_MODE_VOLUME_THRESHOLD) {
-			this.renderingLayer = 0;
-		}
-	}
-
-	public int getMaxRenderingLayer() {
-		return this.schematic != null ? this.schematic.getHeight() - 1 : -1;
-	}
-
-	/**
-	 * Slices the overlay to a single Y layer, or to all of them at -1. Values outside the schematic
-	 * are clamped rather than rejected, so a caller can just step the current value by one and let
-	 * this stop at either end.
-	 */
-	public void setRenderingLayer(int layer) {
-		int max = this.getMaxRenderingLayer();
-		int clamped = max < 0 ? -1 : Math.max(-1, Math.min(layer, max));
-		if (clamped == this.renderingLayer) {
-			// Held at one end of the range, or nothing is loaded: rebuilding would draw the same thing.
-			return;
-		}
-
-		this.renderingLayer = clamped;
-		this.needsUpdate = true;
-	}
-
-	/**
-	 * Called for every single-block change in the live world. Only changes that can alter what the
-	 * overlay draws invalidate it - otherwise flowing water or a redstone clock anywhere in the
-	 * world would rebuild the geometry every tick.
-	 *
-	 * <p>Changes are tracked even while the overlay is hidden, which is what lets the toggle key
-	 * bring it back without a rebuild.
-	 */
+	/** Hands a single block change to every open schematic; each decides whether it covers it. */
 	public void onWorldBlockChanged(int x, int y, int z) {
-		// The guide boxes are derived purely from pointA/pointB, so only the schematic overlay -
-		// which compares itself against the world - can be invalidated by a block change.
-		if (this.schematic == null) {
-			return;
-		}
-
-		int localX = x - this.offset.x;
-		int localY = y - this.offset.y;
-		int localZ = z - this.offset.z;
-		if (localX < 0 || localY < 0 || localZ < 0
-				|| localX >= this.schematic.getWidth()
-				|| localY >= this.schematic.getHeight()
-				|| localZ >= this.schematic.getLength()) {
-			return;
-		}
-
-		// One block placed or broken only changes the cell it landed in, so hand the position to the
-		// renderer rather than marking the whole schematic stale.
-		SchematicRenderer renderer = Schematica.getRenderer();
-		if (renderer != null) {
-			renderer.invalidateBlock(localX, localY, localZ);
-		} else {
-			this.needsUpdate = true;
+		for (int i = 0; i < this.open.size(); i++) {
+			this.open.get(i).onWorldBlockChanged(x, y, z);
 		}
 	}
 
-	/**
-	 * Called for a chunk of world arriving from a server, which single block changes do not cover:
-	 * a chunk lands in one go and never reports the thousands of blocks in it one at a time.
-	 *
-	 * <p>Without this a schematic put back the moment a server hands over the world would be drawn
-	 * against a world that is not there yet, and every block of it would read as missing until
-	 * something else happened to touch it.
-	 */
+	/** The same for a chunk of world arriving from a server. */
 	public void onWorldChunkLoaded(int x, int y, int z, int sizeX, int sizeY, int sizeZ) {
-		if (this.schematic == null || sizeX <= 0 || sizeY <= 0 || sizeZ <= 0) {
+		if (sizeX <= 0 || sizeY <= 0 || sizeZ <= 0) {
 			return;
 		}
-
-		int localX = x - this.offset.x;
-		int localY = y - this.offset.y;
-		int localZ = z - this.offset.z;
-
-		SchematicRenderer renderer = Schematica.getRenderer();
-		if (renderer != null) {
-			renderer.invalidateBox(localX, localY, localZ,
-					localX + sizeX - 1, localY + sizeY - 1, localZ + sizeZ - 1);
-		} else {
-			this.needsUpdate = true;
+		for (int i = 0; i < this.open.size(); i++) {
+			this.open.get(i).onWorldChunkLoaded(x, y, z, sizeX, sizeY, sizeZ);
 		}
 	}
 
@@ -509,7 +480,7 @@ public class SchematicaState {
 	 * of Y, all relative to the chunk.
 	 */
 	public void onWorldBlocksChanged(int chunkX, int chunkZ, short[] packed, int count) {
-		if (this.schematic == null || packed == null) {
+		if (packed == null) {
 			return;
 		}
 
@@ -524,129 +495,33 @@ public class SchematicaState {
 		}
 	}
 
-	// --- the world underneath ------------------------------------------------------------------
-
-	/** Edge length of the renderer's regions, which is what the watcher below marks. */
-	private static final int WATCH_REGION = 16;
-
 	/**
-	 * How much of the world the watcher reads. Every second block in each axis, which is plenty to
-	 * see a chunk go from empty to a world - the thing it is there to catch - at an eighth of the
-	 * cost of reading all of it.
-	 */
-	private static final int WATCH_STRIDE = 2;
-
-	/** What the world last read as under each region of the schematic. */
-	private int[] watched = null;
-	private int watchOriginX;
-	private int watchOriginZ;
-	private int watchSpanX;
-	private int watchSpanZ;
-	private int watchRows;
-	/** Which chunk column is looked at next, so one tick only ever pays for one of them. */
-	private int nextColumn = 0;
-
-	/**
-	 * Watches the world underneath the schematic for changes nothing announced.
+	 * Watches the world underneath every open schematic for changes nothing announced.
 	 *
-	 * <p>The overlay is drawn by comparing the schematic against the world, so it is only ever as
-	 * good as the world was at the moment it was built - and a world does not always say when it
-	 * changes. A single player world is handed over while the game is still running: it ticks and
-	 * draws for seconds while reading as air, so a schematic put back in that window is drawn
-	 * against nothing at all and would stay that way, because a world filling itself in is not a
-	 * block change and nothing reports it. Chunks coming and going as the player walks about are the
-	 * same, and so is anything else that writes into a chunk without a word.
+	 * <p>An overlay is drawn by comparing a schematic against the world, so it is only ever as good
+	 * as the world was at the moment it was built - and a world does not always say when it changes.
+	 * A single player world is handed over while the game is still running: it ticks and draws for
+	 * seconds while reading as air, so a schematic put back in that window is drawn against nothing
+	 * at all and would stay that way, because a world filling itself in is not a block change and
+	 * nothing reports it. Chunks coming and going as the player walks about are the same, and so is
+	 * anything else that writes into a chunk without a word.
 	 *
 	 * <p>So the world is read back and compared against what it said last time, one chunk column per
-	 * tick, and any part that has changed underneath us is rebuilt. That bounds the work whatever
-	 * the schematic costs, and puts a ceiling of a second or two on how long the overlay can be
-	 * wrong for a reason nobody told it about.
+	 * schematic per tick, and any part that has changed underneath us is rebuilt. That bounds the
+	 * work whatever the schematics cost, and puts a ceiling of a second or two on how long an
+	 * overlay can be wrong for a reason nobody told it about.
 	 */
-	public void pollWorldUnderSchematic() {
+	public void pollWorldUnderSchematics() {
 		Minecraft mc = this.getMinecraft();
 		World world = mc == null ? null : mc.world;
-		if (this.schematic == null || world == null) {
-			this.watched = null;
-			return;
-		}
-
-		int originX = this.offset.x >> 4;
-		int originZ = this.offset.z >> 4;
-		int spanX = ((this.offset.x + this.schematic.getWidth() - 1) >> 4) - originX + 1;
-		int spanZ = ((this.offset.z + this.schematic.getLength() - 1) >> 4) - originZ + 1;
-		int rows = (this.schematic.getHeight() + WATCH_REGION - 1) / WATCH_REGION;
-
-		if (this.watched == null || this.watchOriginX != originX || this.watchOriginZ != originZ
-				|| this.watchSpanX != spanX || this.watchSpanZ != spanZ || this.watchRows != rows) {
-			// A different schematic, or the same one somewhere else. Start the record again rather
-			// than compare against a world that was under something else - whatever moved it has
-			// already marked the whole overlay for rebuilding anyway.
-			this.watchOriginX = originX;
-			this.watchOriginZ = originZ;
-			this.watchSpanX = spanX;
-			this.watchSpanZ = spanZ;
-			this.watchRows = rows;
-			this.watched = new int[Math.max(1, spanX * spanZ * rows)];
-			this.nextColumn = 0;
-			for (int column = 0; column < spanX * spanZ; column++) {
-				this.readColumn(world, column, null);
-			}
-			return;
-		}
-
-		int columns = this.watchSpanX * this.watchSpanZ;
-		if (columns > 0) {
-			int column = this.nextColumn % columns;
-			this.nextColumn = column + 1;
-			this.readColumn(world, column, Schematica.getRenderer());
-		}
-	}
-
-	/**
-	 * Reads one chunk column of the world under the schematic, a region-tall row at a time, and
-	 * marks any row that no longer reads the way it did. With no renderer to mark, the readings are
-	 * simply recorded - which is how the first pass over a schematic gets its starting point.
-	 */
-	private void readColumn(World world, int column, SchematicRenderer renderer) {
-		int chunkX = this.watchOriginX + column / this.watchSpanZ;
-		int chunkZ = this.watchOriginZ + column % this.watchSpanZ;
-
-		int fromX = Math.max(chunkX << 4, this.offset.x) - this.offset.x;
-		int toX = Math.min((chunkX << 4) + 15, this.offset.x + this.schematic.getWidth() - 1) - this.offset.x;
-		int fromZ = Math.max(chunkZ << 4, this.offset.z) - this.offset.z;
-		int toZ = Math.min((chunkZ << 4) + 15, this.offset.z + this.schematic.getLength() - 1) - this.offset.z;
-		int height = this.schematic.getHeight();
-
-		for (int row = 0; row < this.watchRows; row++) {
-			int fromY = row * WATCH_REGION;
-			int toY = Math.min(fromY + WATCH_REGION - 1, height - 1);
-
-			int contents = 1;
-			for (int x = fromX; x <= toX; x += WATCH_STRIDE) {
-				for (int z = fromZ; z <= toZ; z += WATCH_STRIDE) {
-					for (int y = fromY; y <= toY; y += WATCH_STRIDE) {
-						contents = contents * 31 + world.getBlockId(
-								x + this.offset.x, y + this.offset.y, z + this.offset.z);
-					}
-				}
-			}
-
-			int index = column * this.watchRows + row;
-			if (this.watched[index] == contents) {
-				continue;
-			}
-			this.watched[index] = contents;
-
-			if (renderer == null) {
-				continue;
-			}
-			renderer.invalidateBox(fromX, fromY, fromZ, toX, toY, toZ);
+		for (int i = 0; i < this.open.size(); i++) {
+			this.open.get(i).pollWorldUnder(world);
 		}
 	}
 
 	/** Drops the render state that is tied to a particular world instance. */
 	public void onWorldChanged() {
-		this.clearSchematic();
+		this.closeAll();
 		this.isRenderingGuide = false;
 		// Any swap still waiting on the old server will never be answered now.
 		HotbarRestock.reset();

@@ -77,12 +77,12 @@ public final class EasyPlace {
 	/**
 	 * Whether easy place has anything to act on: the mode is on, and there is an overlay being drawn
 	 * to build against. Everything the mode does hangs off this, so it cannot place faster while it
-	 * is not also holding clicks back - with nothing loaded, or the schematic hidden, it is off in
+	 * is not also holding clicks back - with nothing open, or every one of them hidden, it is off in
 	 * every way that can be felt.
 	 */
 	private static boolean isEngaged() {
 		SchematicaState state = Schematica.STATE;
-		return state.isEasyPlace && state.schematic != null && state.isRenderingSchematic;
+		return state.isEasyPlace && state.isAnyRendering();
 	}
 
 	/**
@@ -179,25 +179,26 @@ public final class EasyPlace {
 	 * @param face the side the block would be placed against, which is what vanilla is asked about
 	 */
 	private static int buildableAt(Minecraft mc, int x, int y, int z, int face) {
-		SchematicaState state = Schematica.STATE;
-		int localX = x - state.offset.x;
-		int localY = y - state.offset.y;
-		int localZ = z - state.offset.z;
-
-		// A layer slice is the course being built, so a position outside it is not a target either -
-		// there is nothing drawn there to aim at.
-		if (state.renderingLayer != -1 && state.renderingLayer != localY) {
+		// Whichever of the open schematics is drawing something there, which is also what settles
+		// the layer slice: a position outside the course being built is not a target, because there
+		// is nothing drawn there to aim at.
+		OpenSchematic open = Schematica.STATE.schematicAt(x, y, z);
+		if (open == null) {
 			return 0;
 		}
 
-		int wantedId = state.schematic.getBlockId(localX, localY, localZ);
+		int localX = x - open.offset.x;
+		int localY = y - open.offset.y;
+		int localZ = z - open.offset.z;
+
+		int wantedId = open.schematic.getBlockId(localX, localY, localZ);
 		if (blockById(wantedId) == null) {
 			return 0;
 		}
 
 		// A door or a bed is two blocks put down by one click, and it is the bottom half that is
 		// placed; aiming at the top half is aiming at something the other half brings with it.
-		int wantedMetadata = state.schematic.method_1778(localX, localY, localZ);
+		int wantedMetadata = open.schematic.method_1778(localX, localY, localZ);
 		if ((wantedMetadata & SECOND_HALF) != 0
 				&& (wantedId == BED || wantedId == WOODEN_DOOR || wantedId == IRON_DOOR)) {
 			return 0;
@@ -210,9 +211,16 @@ public final class EasyPlace {
 		return mc.world.method_156(wantedId, x, y, z, false, face) ? wantedId : 0;
 	}
 
+	/**
+	 * The metadata wanted at a world position, which is only ever asked about one that
+	 * {@link #buildableAt} has already answered for - so the schematic covering it is the same one.
+	 */
 	private static int wantedMetadataAt(int x, int y, int z) {
-		SchematicaState state = Schematica.STATE;
-		return state.schematic.method_1778(x - state.offset.x, y - state.offset.y, z - state.offset.z);
+		OpenSchematic open = Schematica.STATE.schematicAt(x, y, z);
+		if (open == null) {
+			return 0;
+		}
+		return open.schematic.method_1778(x - open.offset.x, y - open.offset.y, z - open.offset.z);
 	}
 
 	/**
