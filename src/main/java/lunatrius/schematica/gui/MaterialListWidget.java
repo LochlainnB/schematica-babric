@@ -12,10 +12,20 @@ import net.minecraft.client.render.item.ItemRenderer;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
 
-/** The scrolling list of materials inside {@link MaterialListScreen}. */
+/**
+ * The scrolling list of materials inside {@link MaterialListScreen}.
+ *
+ * <p>A row is two lines rather than one: the icon, the name and the counts across the first, and
+ * under the count what it comes to in stacks. Every row is laid out the same way whether or not it
+ * has that second line, so the names and the numbers hold one level down the list rather than
+ * stepping about as the rows big enough to fill a stack come and go.
+ */
 class MaterialListWidget extends EntryListWidget {
-	private static final int ENTRY_HEIGHT = 20;
+	/** Room for two lines of text beside a 16-pixel icon, and the gap the list leaves between rows. */
+	private static final int ENTRY_HEIGHT = 24;
 	private static final int ICON_SIZE = 16;
+	/** How far under the first line of a row the second one sits. */
+	private static final int SECOND_LINE = 10;
 
 	/** Right edge of each column, measured from the left of a row. */
 	static final int NAME_LEFT = ICON_SIZE + 4;
@@ -30,6 +40,7 @@ class MaterialListWidget extends EntryListWidget {
 	private static final int COUNT_COLOUR = 0xA0A0A0;
 	private static final int MISSING_COLOUR = 0xFFFFFF;
 	private static final int NOTHING_MISSING_COLOUR = 0x55FF55;
+	private static final int STACKS_COLOUR = 0x808080;
 
 	private final MaterialListScreen parent;
 
@@ -84,16 +95,25 @@ class MaterialListWidget extends EntryListWidget {
 		GL11.glRotatef(120.0F, 1.0F, 0.0F, 0.0F);
 		class_583.method_1930();
 		GL11.glPopMatrix();
-		ITEMS.method_1487(mc.textRenderer, mc.textureManager, entry.getStack(), x, y);
+		ITEMS.method_1487(mc.textRenderer, mc.textureManager, entry.getStack(), x,
+				y + (entryHeight - ICON_SIZE) / 2);
 		class_583.method_1927();
 		GL11.glDisable(GL12.GL_RESCALE_NORMAL);
 		GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
 
-		int text = y + (entryHeight - 8) / 2;
+		int text = y + 2;
 		this.parent.drawStringWithShadow(mc.textRenderer, entry.getName(), x + NAME_LEFT, text,
 				missing == 0 ? DONE_COLOUR : NAME_COLOUR);
 		this.parent.drawRight(entry.getHave() + " / " + entry.getNeeded(), x + HAVE_RIGHT, text, COUNT_COLOUR);
 		this.parent.drawRight(Integer.toString(missing), x + MISSING_RIGHT, text,
 				missing == 0 ? NOTHING_MISSING_COLOUR : MISSING_COLOUR);
+
+		// What the schematic wants of it in the stacks it would be carried in, under the number it
+		// is a restatement of. Nothing at all for a door or a bed, which do not stack, or for a
+		// count that does not fill one - the number is already the answer there.
+		String stacks = entry.getNeededStacks();
+		if (!stacks.isEmpty()) {
+			this.parent.drawRight(stacks, x + HAVE_RIGHT, text + SECOND_LINE, STACKS_COLOUR);
+		}
 	}
 }

@@ -36,6 +36,7 @@ import lunatrius.schematica.schematic.Schematic;
 import lunatrius.schematica.schematic.SchematicFormat;
 import lunatrius.schematica.schematic.SchematicWorld;
 import lunatrius.schematica.util.Log;
+import lunatrius.schematica.util.Stacks;
 import lunatrius.schematica.util.Translations;
 import lunatrius.schematica.util.Vec3i;
 import net.fabricmc.loader.api.metadata.ModMetadata;
@@ -178,6 +179,20 @@ public final class SmokeTest {
 	private static final int DELETE_TIMEOUT_TICKS = 101;
 	/** And long enough to be past the moment a fresh one refuses to be answered in. */
 	private static final int DELETE_DELAY_TICKS = 12;
+
+	/**
+	 * The schematic the material list is shot over, and what it is made of. The amounts are the
+	 * point of it: several stacks of one thing, a stack and a few of another, exactly a stack of a
+	 * third, and one that does not fill one - so that every way a row can be written is on the
+	 * screen at once.
+	 */
+	private static final String STACK_FILE = "smoketest-stacks.schematic";
+	private static final int STACK_SCENE_SIZE = 8;
+	private static final int STACK_SCENE_HEIGHT = 5;
+	private static final int STACK_SCENE_COBBLESTONE = 150;
+	private static final int STACK_SCENE_GOLD = 70;
+	private static final int STACK_SCENE_WOOL = 64;
+	private static final int STACK_SCENE_TORCH = 20;
 
 	/** Nine blocks to fill the bar plus the gold, which is what the server is asked to hand out. */
 	private static final int TEST_STACKS = 10;
@@ -618,6 +633,35 @@ public final class SmokeTest {
 		checkText("named out of what this version does have",
 				materialRow(later, SLAB, 0).getName(), "Stone Slab");
 
+		// The same count read the way a pack holds it. The arithmetic first, since every case of it
+		// is a line rather than a schematic.
+		checkText("a pile over a stack is stacks and a remainder", Stacks.describe(70, 64), "1x64 + 6");
+		checkText("exactly a stack is a stack", Stacks.describe(64, 64), "1x64");
+		checkText("and two of them are two", Stacks.describe(128, 64), "2x64");
+		checkText("under a stack there is nothing to say", Stacks.describe(63, 64), "");
+		checkText("nor for nothing at all", Stacks.describe(0, 64), "");
+		checkText("a stack is however many the item stacks to", Stacks.describe(18, 16), "1x16 + 2");
+		checkText("and something that does not stack has no stacks", Stacks.describe(5, 1), "");
+		checkText("a great many are grouped like every other number in the mod",
+				Stacks.describe(70000, 64), "1,093x64 + 48");
+
+		// Then through a row, where the stack size is the item's own rather than a number the test
+		// picked: cobblestone stacks and a door does not.
+		int[][][] pile = new int[9][1][9];
+		for (int x = 0; x < 9; x++) {
+			for (int z = 0; z < 9; z++) {
+				pile[x][0][z] = COBBLESTONE;
+			}
+		}
+		pile[0][0][0] = WOODEN_DOOR;
+
+		MaterialList stacked =
+				MaterialList.of(new Schematic(pile, new int[9][1][9], new ArrayList<>(), 9, 1, 9));
+		check("eighty cobblestone", materialNeeded(stacked, COBBLESTONE, 0), 80);
+		checkText("which is a stack and sixteen", materialStacks(stacked, COBBLESTONE, 0), "1x64 + 16");
+		checkText("and a door, which does not stack, says nothing",
+				materialStacks(stacked, WOODEN_DOOR_ITEM, 0), "");
+
 		Log.info("SMOKETEST: --- material list done ---");
 	}
 
@@ -693,6 +737,32 @@ public final class SmokeTest {
 				list.getOutstanding(MaterialList.Sort.DESCENDING).size(), 0);
 		check("though the list behind it still has every one", list.getEntries().size(), 3);
 
+		// What a row says on the right, which is the one number the corner of the screen has room
+		// for: what is left of a pile, in the stacks it would be carried in.
+		int[][][] pile = new int[10][1][10];
+		for (int x = 0; x < 10; x++) {
+			for (int z = 0; z < 10; z++) {
+				pile[x][0][z] = COBBLESTONE;
+			}
+		}
+		pile[0][0][0] = WOODEN_DOOR;
+
+		MaterialList heavy =
+				MaterialList.of(new Schematic(pile, new int[10][1][10], new ArrayList<>(), 10, 1, 10));
+		heavy.countInventory(new ItemStack[0]);
+		List<MaterialList.Entry> jobs = heavy.getOutstanding(MaterialList.Sort.DESCENDING);
+		checkText("a row with more than a stack left says how many stacks",
+				InfoHud.amount(hudRow(jobs, COBBLESTONE)), "1x64 + 35");
+		checkText("and one that does not stack says the number it always did",
+				InfoHud.amount(hudRow(jobs, WOODEN_DOOR_ITEM)), "1");
+
+		// It is what is left rather than what the schematic takes, so it comes down as the job does.
+		ItemStack[] some = { new ItemStack(COBBLESTONE, 40, 0) };
+		heavy.countInventory(some);
+		checkText("and is a plain number again once what is left fits in one stack",
+				InfoHud.amount(hudRow(heavy.getOutstanding(MaterialList.Sort.DESCENDING), COBBLESTONE)),
+				"59");
+
 		Log.info("SMOKETEST: --- info hud done ---");
 	}
 
@@ -719,6 +789,11 @@ public final class SmokeTest {
 	private static int materialNeeded(MaterialList list, int itemId, int damage) {
 		MaterialList.Entry entry = materialRow(list, itemId, damage);
 		return entry == null ? -1 : entry.getNeeded();
+	}
+
+	private static String materialStacks(MaterialList list, int itemId, int damage) {
+		MaterialList.Entry entry = materialRow(list, itemId, damage);
+		return entry == null ? "no row" : entry.getNeededStacks();
 	}
 
 	private static int materialHave(MaterialList list, int itemId, int damage) {
@@ -2223,6 +2298,16 @@ public final class SmokeTest {
 				return;
 			case 18:
 				setUpDeleteScene(mc);
+				return;
+			case 19:
+				setUpMaterialStackScene(mc);
+				return;
+			case 20:
+				// The same list in the corner of the screen, on the schematic the scene before it
+				// counted: the one shot there is of a HUD row said in stacks.
+				mc.setScreen(null);
+				Schematica.CONFIG.infoHud = true;
+				Log.info("SMOKETEST: scene 21 - the info hud, counted in stacks");
 				return;
 			default:
 				mc.setScreen(null);
@@ -4385,5 +4470,76 @@ public final class SmokeTest {
 			fail("could not read the load screen's file list", exception);
 			return new ArrayList<>();
 		}
+	}
+
+	/**
+	 * The material list of a schematic big enough to be carried in stacks, which is the only shot
+	 * of the second line a row can have.
+	 *
+	 * <p>Its own schematic, and one built to have every case in it at once: a pile of several
+	 * stacks, one of a stack and a few, one that is exactly a stack, one that does not fill one,
+	 * and a door, which does not stack at all and so has nothing to say about stacks.
+	 */
+	private static void setUpMaterialStackScene(Minecraft mc) {
+		SchematicaState state = Schematica.STATE;
+		if (mc.world == null) {
+			Log.info("SMOKETEST: no world, skipping the material stacks scene");
+			return;
+		}
+
+		int[][][] blocks = new int[STACK_SCENE_SIZE][STACK_SCENE_HEIGHT][STACK_SCENE_SIZE];
+		int[][][] metadata = new int[STACK_SCENE_SIZE][STACK_SCENE_HEIGHT][STACK_SCENE_SIZE];
+		int placed = 0;
+		for (int y = 0; y < STACK_SCENE_HEIGHT; y++) {
+			for (int x = 0; x < STACK_SCENE_SIZE; x++) {
+				for (int z = 0; z < STACK_SCENE_SIZE; z++) {
+					blocks[x][y][z] = stackSceneBlock(placed++);
+				}
+			}
+		}
+		// The two halves of one door, which the list counts as the one door you would fetch.
+		blocks[0][0][0] = WOODEN_DOOR;
+		blocks[0][1][0] = WOODEN_DOOR;
+		metadata[0][1][0] = DOOR_TOP;
+
+		File file = new File(state.getSchematicDirectory(), STACK_FILE);
+		try {
+			SchematicFormat.write(file, new Schematic(blocks, metadata, new ArrayList<>(),
+					STACK_SCENE_SIZE, STACK_SCENE_HEIGHT, STACK_SCENE_SIZE));
+		} catch (IOException exception) {
+			fail("could not write the schematic for the material stacks scene", exception);
+			return;
+		}
+
+		state.closeAll();
+		if (!state.openSchematic(file)) {
+			fail("openSchematic returned false setting up the material stacks scene", null);
+			return;
+		}
+
+		state.getActive().offset.set(baseX, baseY, baseZ + STRUCTURE_SIZE + 2);
+		state.getActive().isRenderingSchematic = true;
+		state.getActive().needsUpdate = true;
+		parkCamera(mc);
+
+		mc.setScreen(new MaterialListScreen(null));
+		Log.info("SMOKETEST: scene " + scene + " - the material list, counted in stacks");
+	}
+
+	/** Which block the n-th cell of that schematic holds, which is what makes each row its size. */
+	private static int stackSceneBlock(int index) {
+		if (index < STACK_SCENE_COBBLESTONE) {
+			return COBBLESTONE;
+		}
+		if (index < STACK_SCENE_COBBLESTONE + STACK_SCENE_GOLD) {
+			return GOLD;
+		}
+		if (index < STACK_SCENE_COBBLESTONE + STACK_SCENE_GOLD + STACK_SCENE_WOOL) {
+			return WOOL;
+		}
+		if (index < STACK_SCENE_COBBLESTONE + STACK_SCENE_GOLD + STACK_SCENE_WOOL + STACK_SCENE_TORCH) {
+			return TORCH;
+		}
+		return 0;
 	}
 }

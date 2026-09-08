@@ -136,6 +136,12 @@ and a pool asks for one bucket per source block rather than one per block of wat
 would genuinely have to carry is still listed even where survival cannot supply it - bedrock in a
 schematic is bedrock you need.
 
+Under what a row needs is the same number written in stacks: seventy cobblestone is a stack and six,
+which is what you are counting in while you fill a chest rather than what the list would otherwise
+have you work out at every row. It is only there where it says something the count does not, so a
+row under a full stack has none. The stack size is the item's own rather than sixty-four, which is
+how a door, a bed, a sign and a bucket come to say nothing about stacks: none of them stack at all.
+
 The `Have` column is counted again every tick while the screen is open, so the numbers fall as you
 pick things up: empty a chest into your pack with the screen still open and you can watch what is
 left to gather come down. A spare stack is never a debt - having sixty-four of something the
@@ -156,6 +162,12 @@ material and comes back the moment you are not, so what is left on screen is wha
 when there is nothing left it says so rather than disappearing, which is the difference between
 finished and switched off. Rows are counted again every tick, whether or not a screen is open, so
 you can watch a row go while sorting a chest.
+
+The number on a row is what is left of it, in the stacks you would carry it in: a hundred and
+forty-eight cobblestone still to find reads `2x64 + 20`. The corner of the screen has room for one
+number a row, so that number is written the way the pile would be packed rather than said twice, and
+it comes down as you gather - back to a plain count once what is left of a row fits in one stack.
+The material list has the room to do both, and puts the stacks under the count instead.
 
 **HUD Sort** puts either the most or the fewest the schematic takes at the top. That is what it
 takes, not what is left of it, so a row holds its place while you work on it: collect eleven of the
@@ -582,7 +594,8 @@ Behaviour is otherwise the same as 1.2.0.10; these are deliberate changes:
   reflection rather than compiled against - see above.
 - **A material list.** The original drew a schematic and left working out what it would take to
   build entirely to you. This counts it, in the items you would go and fetch, and counts your
-  inventory against it - on a screen, or in a HUD in the corner listing only what is still short.
+  inventory against it - on a screen, or in a HUD in the corner listing only what is still short,
+  with what each row comes to in the stacks you would carry it in as well as in blocks.
 - **Schematics can be deleted from the game.** The original could only ever add to the folder, so
   tidying one up meant leaving the game and finding it on disk. **Delete** on the load screen takes
   the highlighted file away on a second press, into the platform's wastebasket where there is one.
@@ -746,6 +759,15 @@ after the warning has been walked away from by highlighting something else, and 
 left alone long enough to expire. Only two presses that were meant take it, after which the list is
 checked to have been taken again without it and nothing to be left highlighted. Scene 19 is the
 screen with a warning up, which is the only shot there is of one.
+
+Stacks are arithmetic and are checked as arithmetic - a pile over a stack, exactly a stack, two of
+them, one that does not fill one, something that does not stack at all, and a number big enough to
+be grouped - and then once more through a row, where the stack size is the item's own rather than
+one the test chose. The HUD says the same thing with the one number it has room for, so it is asked
+what a row reads with more than a stack left, with less, and for a pile that does not stack at all,
+and checked to come back down to a plain count as the row is gathered. Scene 20 is a material list
+built to hold every way a row can be written at once, and scene 21 the corner of the screen counting
+the same schematic.
 
 Remembering what was open is checked from both ends. The name the mod gave the test world on its own
 is asserted to be the folder that world was started from, and on a server the address the connect

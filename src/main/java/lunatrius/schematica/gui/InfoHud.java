@@ -6,6 +6,7 @@ import java.util.Locale;
 
 import lunatrius.schematica.MaterialList;
 import lunatrius.schematica.Schematica;
+import lunatrius.schematica.util.Stacks;
 import lunatrius.schematica.util.Translations;
 import net.minecraft.class_564;
 import net.minecraft.class_583;
@@ -29,6 +30,9 @@ import org.lwjgl.opengl.GL12;
  *
  * <p>It draws from the end of the vanilla HUD rather than from a hook of its own, which is what
  * gets it the gui scale, the F1 toggle and the right place in the draw order for nothing.
+ *
+ * <p>A row says what is left of it in the stacks it would be carried in, which is what {
+ * #amount} is for - the screen next door has room to say a number twice and this has not.
  *
  * <p>The rows are worked out once a tick and drawn from as they are. Sorting them per frame would
  * be the same answer sixty times over, and the numbers only move on a tick anyway.
@@ -184,13 +188,32 @@ public final class InfoHud extends DrawableHelper {
 			int line = firstRow + i * ROW_HEIGHT + (ROW_HEIGHT - 8) / 2;
 			this.drawStringWithShadow(
 					text, entry.getName(), contentLeft + ICON_SIZE + ICON_GAP, line, NAME_COLOUR);
-			this.drawRight(text, count(entry.getMissing()), contentRight, line, COUNT_COLOUR);
+			this.drawRight(text, amount(entry), contentRight, line, COUNT_COLOUR);
 		}
 
 		if (note != null) {
 			this.drawStringWithShadow(
 					text, note, contentLeft, firstRow + shown.size() * ROW_HEIGHT, NOTE_COLOUR);
 		}
+	}
+
+	/**
+	 * What a row says on the right: how much of it is still to be found, written in the stacks it
+	 * would be carried in wherever that comes to more than one of them.
+	 *
+	 * <p>The material list screen has room to say a number twice, and puts the stacks under the
+	 * count. The corner of the screen has room for one number a row, so that number is written the
+	 * way the pile would be carried - which is the form it is wanted in while a chest is being
+	 * filled, and is the same number either way. It is what is left rather than what the schematic
+	 * takes, because that is the number this list has always shown: a row here is a job, and the
+	 * stacks fall as it is done.
+	 *
+	 * <p>Public for the same reason {@link #getRows()} is: a screenshot cannot be read back.
+	 */
+	public static String amount(MaterialList.Entry entry) {
+		int missing = entry.getMissing();
+		String stacks = Stacks.describe(missing, entry.getStackSize());
+		return stacks.isEmpty() ? count(missing) : stacks;
 	}
 
 	/** How wide the widest thing in the box is, before the padding either side of it. */
@@ -200,7 +223,7 @@ public final class InfoHud extends DrawableHelper {
 		int counts = 0;
 		for (MaterialList.Entry entry : shown) {
 			names = Math.max(names, text.getWidth(entry.getName()));
-			counts = Math.max(counts, text.getWidth(count(entry.getMissing())));
+			counts = Math.max(counts, text.getWidth(amount(entry)));
 		}
 
 		int width = Math.max(

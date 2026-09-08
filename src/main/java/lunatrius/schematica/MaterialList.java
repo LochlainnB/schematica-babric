@@ -8,6 +8,7 @@ import java.util.Map;
 
 import lunatrius.schematica.schematic.Schematic;
 import lunatrius.schematica.util.ItemNames;
+import lunatrius.schematica.util.Stacks;
 import net.minecraft.Item;
 import net.minecraft.item.ItemStack;
 
@@ -54,6 +55,8 @@ public final class MaterialList {
 		private int have;
 		/** Looked up once and kept: the info HUD sorts on it, and does so again every tick. */
 		private String name;
+		/** The same, since what a schematic takes is settled the moment it has been counted. */
+		private String neededStacks;
 
 		private Entry(int itemId, int damage, int metadata, boolean matchDamage) {
 			this.itemId = itemId;
@@ -77,6 +80,27 @@ public final class MaterialList {
 		/** How many still have to be found. Never negative: a spare stack is not a debt. */
 		public int getMissing() {
 			return Math.max(0, this.needed - this.have);
+		}
+
+		/**
+		 * How many of it go in one stack, which is what turns a count into stacks and a remainder.
+		 * One for everything that does not stack at all - a door, a bed, a sign, a bucket.
+		 */
+		public int getStackSize() {
+			Item item = BlockItems.itemAt(this.itemId);
+			return item == null ? 1 : item.getMaxCount();
+		}
+
+		/**
+		 * What the schematic wants of it, written as the stacks it would be carried in - a stack
+		 * and six, rather than seventy - or nothing at all where that would say no more than the
+		 * number already does.
+		 */
+		public String getNeededStacks() {
+			if (this.neededStacks == null) {
+				this.neededStacks = Stacks.describe(this.needed, this.getStackSize());
+			}
+			return this.neededStacks;
 		}
 
 		/** The name the game itself gives this stack, so a wool row says which colour it is. */
