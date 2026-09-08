@@ -7,8 +7,9 @@ A port of Lunatrius' Schematica 1.2.0.10 for Minecraft Beta 1.7.3 from Risugami'
 Load an MCEdit `.schematic` file and it is drawn over the world as a ghost you can build against,
 with colour-coded boxes showing what is missing or wrong. You can also select a region of the world
 and save it back out as a schematic. A material list says what the whole thing will take and counts
-down as you gather it, on a screen or in the corner of the screen while you build. What you had open
-is still open when you next log in, in the place you left it, for each world and server separately.
+down as you gather it, on a screen or in the corner of the screen while you build. In a creative
+single player world, one button builds the whole thing where it stands. What you had open is still
+open when you next log in, in the place you left it, for each world and server separately.
 
 ## Using it
 
@@ -208,6 +209,59 @@ has answered it: what is in hand is not settled until then. Beta's client keeps 
 clicks are outstanding, so the mod reads the server's answers off the wire itself. A refusal costs a
 round trip and a retry, never an item.
 
+### Pasting it into the world
+
+The **Paste** button on the move screen writes the whole schematic into the world where the ghost is
+standing. Everything the overlay was drawing is simply there.
+
+It is offered in a single player world, in creative mode, and nowhere else. On a server the world
+you are drawing on is not yours to write into - blocks put into the client's copy of it would be a
+lie the next chunk update takes back - and in survival it would hand over a building nobody
+gathered. Beta 1.7.3 has no creative mode of its own, so the answer comes from
+[BHCreative](https://github.com/paulevsGitch/BHCreative); see below.
+
+Where any of that is not true the button is greyed out, and hovering it says which of the reasons it
+is rather than leaving you to work it out.
+
+What gets written is what the ghost draws: the blocks the schematic asks for, and nothing else. A
+cell the schematic leaves empty is left alone rather than cleared, so a build dropped onto a
+hillside does not carve the hill out from under itself. Empty means "no part of this build"
+everywhere else in the mod - the overlay draws nothing there, the material list counts nothing for
+it, easy place will not put anything in it - and pasting reads it the same way.
+
+It goes down in two passes: everything that can be hung on, and then everything that hangs. A block
+is told it has landed the moment it is written, and some of them look around when they hear it - a
+torch checks that it still has a wall, and if it has not, takes itself down and drops on the floor
+as an item. Writing every wall before any torch means the wall is always there to be found.
+
+Reading order is not enough on its own, which is what makes this worth a pass of its own rather than
+a rule of thumb. A redstone wire landing tells the wire next to it, and that one tells all of *its*
+neighbours, so a torch two blocks clear of the wire that arrived can still be asked the question
+before its own wall has been written.
+
+Neighbours are not notified as each block lands, only once all of it is down, so sand does not fall
+through floors that are not laid yet. Each block's own placement still runs, so water flows and
+gravel looks at the ground under it once the whole thing is standing.
+
+Then anything a block decided for itself on the way in is put back to what the schematic says. A
+plain torch re-reads its own facing from whichever neighbour is solid, so one with a wall on both
+sides would otherwise come out facing the wrong one.
+
+The pistons go in last of all, once everything they read is there. A piston is the one block that
+reads the circuit around it the instant it lands rather than waiting to be told about it, and one
+saved extended that finds nothing powering it throws its arm off and pulls itself back in. In
+reading order it reads too early: a farm with a torch on either side of every piston comes out with
+half of them retracted - whichever half had its torch on the far side, written a moment later -
+each with an arm stranded on top of it, a block no player can obtain and nothing will ever take
+away. Left until the circuit is finished and forced back to the state it was saved in, every piston
+gets the answer the saved build gave it. Each arm goes in just before the piston that owns it, so
+one that does decide to pull in takes its own arm with it as it goes.
+
+It happens in one go rather than as a job running in the background, which it can afford to: 42,624
+blocks go down in 31 ms in the dev run, with the lighting the game queues behind them settling over
+the next few ticks. The ghost disappears as it lands, because there is nothing left for it to draw -
+every block it was asking for is now standing there.
+
 ### Coordinates
 
 Every coordinate on the move and save screens can be typed as well as nudged. Click the number,
@@ -266,6 +320,24 @@ Mod Menu is optional and is not bundled. Nothing in the mod references it except
 `compat/ModMenuIntegration`, which Fabric only loads when Mod Menu asks for its entrypoints, so with
 Mod Menu absent the class is never touched.
 
+## BHCreative
+
+Beta 1.7.3 has no creative mode. It arrived in Beta 1.8, so in this version it is something a mod
+adds, and the one nearly every b1.7.3 pack adds it with is
+[BHCreative](https://github.com/paulevsGitch/BHCreative).
+
+Only the paste button needs an answer from it, and it is a dependency of that button and of nothing
+else. The mod is not compiled against - which would have pulled StationAPI in behind it, since
+BHCreative is built on it, and made a build of this one need both - but reached by reflection from
+`compat/CreativeMode`. With BHCreative absent that answers "not in creative mode", the paste button
+greys out and says so, and every other part of the mod carries on exactly as it did.
+
+Reflection is the only way in even with the jar present: BHCreative hangs the flag off the player
+through an interface its own mixin adds to the player class, so there is nothing there to compile
+against. The name it goes in under is the mod's own and is never remapped, which is what makes
+looking it up by string safe. If a later version moves it, the log says so on startup rather than
+leaving a button greyed out for no reason anyone can see.
+
 ## StationAPI
 
 The mod runs alongside [StationAPI](https://github.com/ModificationStation/StationAPI) and neither
@@ -320,12 +392,14 @@ gui/         AxisScreen          routes clicks, keys and the tab order to the fo
              InfoHud               the same list in the corner of the screen, while playing
              four more Screens and a slider widget
 compat/      ModMenuIntegration  optional, loaded only when Mod Menu asks for it
+             CreativeMode        optional, asks BHCreative whether the player is in creative mode
 mixin/       eight small hooks (see below)
 SchematicaState    everything about the current session
 SchematicaConfig   the render settings, and the keybinds it hands to vanilla
 EasyPlace          what a right click is allowed to do while easy place is on
 HotbarRestock      brings a block onto the hotbar, and waits for the server to agree
 Sightline          walks the blocks along the line of sight, nearest first
+SchematicPaste     writing a schematic into the world at once, and who is allowed to
 MaterialList       what a schematic is built out of, counted against an inventory
 SchematicMemory    what was open in each world, kept between sessions
 BlockItems         which item puts a block down, and what you would go and fetch for it
@@ -363,6 +437,11 @@ Behaviour is otherwise the same as 1.2.0.10; these are deliberate changes:
   that was only ever a picture. It also places where vanilla cannot - a block the schematic wants
   with nothing around it goes down in mid air - which is a placement the original could not make at
   all rather than one it made differently. See above for what it does and does not take over.
+- **It can build it for you.** The original only ever drew a schematic. In a creative single player
+  world the move screen has a **Paste** button that writes the whole thing into the world where the
+  ghost is standing, and greys itself out with a reason anywhere that would not be right. Creative
+  mode is not something this version of the game has, so the answer is asked of BHCreative through
+  reflection rather than compiled against - see above.
 - **A material list.** The original drew a schematic and left working out what it would take to
   build entirely to you. This counts it, in the items you would go and fetch, and counts your
   inventory against it - on a screen, or in a HUD in the corner listing only what is still short.
@@ -421,6 +500,36 @@ around it, and nothing goes down where the schematic wants nothing, where the bl
 under it, where it would fall, or where something is in the way. A position an ordinary click could
 reach is checked to be left to the ordinary path, which is what keeps this from quietly taking over
 the common case.
+
+What hangs on a wall gets a check of its own, built from the case that found the fault: a redstone
+torch on the east face of a block, with a run of wire beside it, and a plain torch walled on both
+sides. The torch is checked to be standing, on the wall it was saved against, with the item count in
+the world checked to be exactly what it was before - a torch that came off is a torch lying on the
+floor, and counting the floor is the only way to see that rather than infer it.
+
+Pistons get their own check for the same reason, and from the same starting point: one held out by a
+torch written after it, and one with nothing holding it out at all. The first is checked to be a
+piston still, still out, with its arm on the end of it; the second to have taken its arm in with it,
+since an arm left standing over a piston that has pulled in is a block no player can obtain.
+
+Pasting is checked from both sides of the gate in front of it. The gate is asked with nothing loaded,
+in a single player world and on a server, and each answer asserted by name; the refusal goes through
+the same call the button makes, and the world is checked to be untouched after it. The writing
+underneath is then driven directly, since a plain dev run has no creative mode in it to get past the
+gate with. The schematic is parked over an emptied box of its own with one block left standing in a
+cell it wants nothing in, and afterwards every block it asks for is checked to be standing and turned
+the way it was saved, the sign to have arrived with its text, the schematic to have kept a sign of
+its own rather than handed it over, and that one witness block to still be there - which is the whole
+difference between pasting a build and pasting a box of air, and is not something a count of blocks
+written could show. The button itself is rendered for real from a position over it, which is what
+both greys it out and draws the tooltip.
+
+Drop BHCreative's jar into `run/mods` and add `-PstationApi`, which it needs, and the rest of it runs
+too: the player is stepped into creative mode through the mod's own setter, the gate is asked again,
+the button is rendered again and checked to be live, and the paste is made through the same call the
+button makes rather than through the writing under it. That is the only check there is that the
+bridge to BHCreative still reaches - it is a class name and a method name held in two strings, and
+nothing about a build would ever notice either of them going stale.
 
 The material list is arithmetic over a schematic and an inventory, so it is checked with neither a
 world nor a screen: a schematic holding the cases that make it more than a block count - an item

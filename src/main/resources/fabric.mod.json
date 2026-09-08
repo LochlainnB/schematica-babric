@@ -26,7 +26,8 @@
 		"minecraft": "1.0.0-beta.7.3"
 	},
 	"suggests": {
-		"modmenu": "*"
+		"modmenu": "*",
+		"bhcreative": "*"
 	},
 	"custom": {
 		"modmenu:clientsideOnly": true

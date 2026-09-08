@@ -13,9 +13,11 @@ import lunatrius.schematica.EasyPlace;
 import lunatrius.schematica.HotbarRestock;
 import lunatrius.schematica.MaterialList;
 import lunatrius.schematica.SchematicMemory;
+import lunatrius.schematica.SchematicPaste;
 import lunatrius.schematica.Schematica;
 import lunatrius.schematica.SchematicaConfig;
 import lunatrius.schematica.SchematicaState;
+import lunatrius.schematica.compat.CreativeMode;
 import lunatrius.schematica.gui.InfoHud;
 import lunatrius.schematica.gui.MaterialListScreen;
 import lunatrius.schematica.gui.SchematicControlScreen;
@@ -104,6 +106,21 @@ public final class SmokeTest {
 	private static final int WOOL = 35;
 	private static final int RED_WOOL = 14;
 	private static final int PISTON = 33;
+	private static final int REDSTONE_TORCH = 75;
+	/** The lit one, which is a block of its own rather than a state of the one above. */
+	private static final int LIT_REDSTONE_TORCH = 76;
+	/** The metadata a torch carries when it stands on the floor rather than hanging on a wall. */
+	private static final int TORCH_ON_FLOOR = 5;
+	/** The metadata a torch carries when it hangs on the block to its east - the side of it that
+	 * lands last in a sweep counting x upwards, and so the one that used to arrive too late. */
+	private static final int TORCH_AGAINST_EAST = 2;
+	/** The wall torch schematic the paste test builds for itself. */
+	private static final int TORCH_TEST_WIDTH = 6;
+	private static final int TORCH_TEST_LENGTH = 5;
+	/** The piston schematic the paste test builds for itself. */
+	private static final int PISTON_TEST_WIDTH = 5;
+	private static final int PISTON_TEST_HEIGHT = 3;
+	private static final int PISTON_TEST_LENGTH = 4;
 	private static final int COBBLESTONE = 4;
 	private static final int SNOW_LAYER = 78;
 	private static final int SAND = 12;
@@ -153,6 +170,9 @@ public final class SmokeTest {
 
 	/** Frames the overlay may spend catching up after that before something is declared wrong. */
 	private static final int REBUILD_TIMEOUT_TICKS = 20 * 30;
+
+	/** How far above the ghost the paste test parks the schematic, clear of everything else. */
+	private static final int PASTE_TEST_HEIGHT = 6;
 
 	/** Long enough to outlast the wait a schematic gets for a world that never says it is ready. */
 	private static final int RESTORE_WAIT_TICKS = 70;
@@ -207,6 +227,7 @@ public final class SmokeTest {
 					runDataTests();
 					runKeybindTests(mc);
 					runModMenuTests();
+					runPasteGateTests(mc);
 					phase = WORLD_TEST ? Phase.START_WORLD : Phase.SHOOT;
 					ticks = 0;
 				}
@@ -290,6 +311,10 @@ public final class SmokeTest {
 			case LOAD:
 				runOrientationTests();
 				runMemoryTests(mc);
+				// Before the run's own schematic is loaded, since this one loads its own and
+				// loadAndTransform puts the right one back straight afterwards.
+				runWallTorchTests(mc);
+				runPistonTests(mc);
 				loadAndTransform(mc);
 				phase = Phase.SHOOT;
 				ticks = 0;
@@ -1005,6 +1030,16 @@ public final class SmokeTest {
 				return;
 
 			case 4:
+				// A schematic is loaded now, so the paste gate has something to turn down. The world
+				// being drawn here belongs to the server, and writing into the client's copy of it
+				// would be a lie the next chunk update takes back.
+				checkText("pasting is not offered on a server",
+						SchematicPaste.availability(mc).name(),
+						SchematicPaste.Availability.ON_A_SERVER.name());
+				check("and asking anyway is refused", SchematicPaste.paste(mc), SchematicPaste.REFUSED);
+				check("so the block the schematic wants is still not there",
+						mc.world.getBlockId(targetX, targetY, targetZ), 0);
+
 				Schematica.STATE.isEasyPlace = true;
 				HotbarRestock.reset();
 				mc.field_2823 = hitResult(hitX, hitY, hitZ, SIDE_UP);
@@ -1930,6 +1965,7 @@ public final class SmokeTest {
 				runOverlayUpdateTests();
 				runLayerTests();
 				runEasyPlaceTests(mc);
+				runPasteTests(mc);
 				runCoordinateFieldTests(mc);
 				runMaterialScreenTests(mc);
 				runInfoHudScreenTests(mc);
@@ -2522,6 +2558,519 @@ public final class SmokeTest {
 			use.invoke(mc, 1);
 		} catch (ReflectiveOperationException exception) {
 			fail("could not drive the right click handler", exception);
+		}
+	}
+
+	/**
+	 * What hangs on a wall is still on its wall after a paste.
+	 *
+	 * <p>The case that found this was a redstone torch on the east face of a block: written before
+	 * the block it hangs on, it was still standing on nothing when the run of redstone wire beside it
+	 * arrived. A wire landing tells the wire next to it, and that one tells all of its own
+	 * neighbours - which is the torch being asked whether it still has a wall. It had not, so it took
+	 * itself down and dropped on the floor as an item, leaving a hole in the build and a circuit that
+	 * no longer worked.
+	 *
+	 * <p>The second torch here is a plain one, which fails a different way: unlike a redstone torch
+	 * it re-reads its own facing from whichever neighbour is solid every time it is placed, so with a
+	 * wall on both sides it comes out facing the first one rather than the one it was saved against.
+	 *
+	 * <p>Builds its own schematic rather than using the run's, because both faults need a particular
+	 * arrangement of block, torch and wire. Puts the world back the way it found it; the schematic it
+	 * loads is replaced by the caller's next load.
+	 */
+	private static void runWallTorchTests(Minecraft mc) {
+		Log.info("SMOKETEST: --- pasting what hangs on a wall ---");
+		SchematicaState state = Schematica.STATE;
+		World world = mc.world;
+
+		int[][][] blocks = new int[TORCH_TEST_WIDTH][2][TORCH_TEST_LENGTH];
+		int[][][] metadata = new int[TORCH_TEST_WIDTH][2][TORCH_TEST_LENGTH];
+
+		// A floor, so the wire has something to lie on and nothing falls through.
+		for (int x = 0; x < TORCH_TEST_WIDTH; x++) {
+			for (int z = 0; z < TORCH_TEST_LENGTH; z++) {
+				blocks[x][0][z] = COBBLESTONE;
+			}
+		}
+
+		// The redstone torch, its wall one block east of it, and the pair of wires that used to knock
+		// it down. Two of them, because one wire on its own tells nobody: a wire landing looks for
+		// other wires beside it and tells their neighbours, so it takes the second wire to reach past
+		// the first one and ask the torch whether it still has a wall.
+		blocks[1][1][1] = REDSTONE_TORCH;
+		metadata[1][1][1] = TORCH_AGAINST_EAST;
+		blocks[2][1][1] = COBBLESTONE;
+		blocks[1][1][2] = REDSTONE_WIRE;
+		blocks[1][1][3] = REDSTONE_WIRE;
+
+		// The plain torch, walled on both sides, saved against the eastern one.
+		blocks[3][1][3] = COBBLESTONE;
+		blocks[4][1][3] = TORCH;
+		metadata[4][1][3] = TORCH_AGAINST_EAST;
+		blocks[5][1][3] = COBBLESTONE;
+
+		File file = new File(state.getSchematicDirectory(), "smoketest-torch.schematic");
+		try {
+			SchematicFormat.write(file, new Schematic(blocks, metadata, new ArrayList<>(),
+					TORCH_TEST_WIDTH, 2, TORCH_TEST_LENGTH));
+		} catch (java.io.IOException exception) {
+			fail("could not write the wall torch schematic", exception);
+			return;
+		}
+		if (!state.loadSchematic(file)) {
+			fail("loadSchematic returned false for the wall torch schematic", null);
+			return;
+		}
+
+		int pasteX = baseX;
+		int pasteY = baseY + PASTE_TEST_HEIGHT;
+		int pasteZ = baseZ;
+
+		int[][][] savedBlocks = new int[TORCH_TEST_WIDTH][2][TORCH_TEST_LENGTH];
+		int[][][] savedMetadata = new int[TORCH_TEST_WIDTH][2][TORCH_TEST_LENGTH];
+		for (int x = 0; x < TORCH_TEST_WIDTH; x++) {
+			for (int y = 0; y < 2; y++) {
+				for (int z = 0; z < TORCH_TEST_LENGTH; z++) {
+					savedBlocks[x][y][z] = world.getBlockId(pasteX + x, pasteY + y, pasteZ + z);
+					savedMetadata[x][y][z] = world.method_1778(pasteX + x, pasteY + y, pasteZ + z);
+					world.method_201(pasteX + x, pasteY + y, pasteZ + z, 0, 0);
+				}
+			}
+		}
+
+		try {
+			state.offset.set(pasteX, pasteY, pasteZ);
+			int dropped = world.method_174(net.minecraft.class_142.class);
+
+			SchematicPaste.write(world, state);
+
+			check("the wall torch is where it was put",
+					world.getBlockId(pasteX + 1, pasteY + 1, pasteZ + 1), REDSTONE_TORCH);
+			check("on the wall it was saved against",
+					world.method_1778(pasteX + 1, pasteY + 1, pasteZ + 1), TORCH_AGAINST_EAST);
+			check("the wall itself is there to be on",
+					world.getBlockId(pasteX + 2, pasteY + 1, pasteZ + 1), COBBLESTONE);
+			check("and nothing was knocked off onto the floor",
+					world.method_174(net.minecraft.class_142.class), dropped);
+
+			check("a plain torch walled on both sides is there too",
+					world.getBlockId(pasteX + 4, pasteY + 1, pasteZ + 3), TORCH);
+			check("facing the wall it was saved against rather than the other one",
+					world.method_1778(pasteX + 4, pasteY + 1, pasteZ + 3), TORCH_AGAINST_EAST);
+		} finally {
+			for (int x = 0; x < TORCH_TEST_WIDTH; x++) {
+				for (int y = 0; y < 2; y++) {
+					for (int z = 0; z < TORCH_TEST_LENGTH; z++) {
+						world.method_201(pasteX + x, pasteY + y, pasteZ + z,
+								savedBlocks[x][y][z], savedMetadata[x][y][z]);
+					}
+				}
+			}
+			state.needsUpdate = true;
+		}
+
+		Log.info("SMOKETEST: --- pasting what hangs on a wall done ---");
+	}
+
+	/**
+	 * Pasting a piston that is out - two blocks the game only treats as one machine when it finds
+	 * both of them together.
+	 *
+	 * <p>A piston reads the circuit around it the instant it lands, and an extended one that finds
+	 * nothing powering it throws its arm off and pulls itself back in. Written in reading order it
+	 * reads too early: the torch holding this one out is one cell further along and has not been
+	 * written yet, so the piston came in retracted and its arm landed afterwards on top of it - a
+	 * block no player can obtain, with nothing behind it that would ever take it away again. In a
+	 * farm with a torch on either side of every piston that is half of them, and which half is
+	 * decided by nothing but which side each one's torch happens to be on.
+	 *
+	 * <p>The second piston here has nothing powering it at all, and is the other half of the same
+	 * question: it is meant to pull itself in, and to take its arm with it when it does.
+	 *
+	 * <p>Builds its own schematic, since both halves need the torch on a particular side. Puts the
+	 * world back the way it found it; the schematic it loads is replaced by the caller's next load.
+	 */
+	private static void runPistonTests(Minecraft mc) {
+		Log.info("SMOKETEST: --- pasting a piston that is out ---");
+		SchematicaState state = Schematica.STATE;
+		World world = mc.world;
+
+		int[][][] blocks = new int[PISTON_TEST_WIDTH][PISTON_TEST_HEIGHT][PISTON_TEST_LENGTH];
+		int[][][] metadata = new int[PISTON_TEST_WIDTH][PISTON_TEST_HEIGHT][PISTON_TEST_LENGTH];
+
+		// A floor, for the torch to stand on.
+		for (int x = 0; x < PISTON_TEST_WIDTH; x++) {
+			for (int z = 0; z < PISTON_TEST_LENGTH; z++) {
+				blocks[x][0][z] = COBBLESTONE;
+			}
+		}
+
+		// A piston held out by a torch on the far side of it, so that reading order arrives at the
+		// piston first and at the only thing that answers for it second.
+		blocks[1][1][1] = PISTON;
+		metadata[1][1][1] = EXTENDED + SIDE_UP;
+		blocks[1][2][1] = PISTON_HEAD;
+		metadata[1][2][1] = SIDE_UP;
+		blocks[1][1][2] = LIT_REDSTONE_TORCH;
+		metadata[1][1][2] = TORCH_ON_FLOOR;
+
+		// And one with nothing holding it out at all.
+		blocks[3][1][1] = PISTON;
+		metadata[3][1][1] = EXTENDED + SIDE_UP;
+		blocks[3][2][1] = PISTON_HEAD;
+		metadata[3][2][1] = SIDE_UP;
+
+		File file = new File(state.getSchematicDirectory(), "smoketest-piston.schematic");
+		try {
+			SchematicFormat.write(file, new Schematic(blocks, metadata, new ArrayList<>(),
+					PISTON_TEST_WIDTH, PISTON_TEST_HEIGHT, PISTON_TEST_LENGTH));
+		} catch (java.io.IOException exception) {
+			fail("could not write the piston schematic", exception);
+			return;
+		}
+		if (!state.loadSchematic(file)) {
+			fail("loadSchematic returned false for the piston schematic", null);
+			return;
+		}
+
+		int pasteX = baseX;
+		int pasteY = baseY + PASTE_TEST_HEIGHT;
+		int pasteZ = baseZ;
+
+		int[][][] savedBlocks = new int[PISTON_TEST_WIDTH][PISTON_TEST_HEIGHT][PISTON_TEST_LENGTH];
+		int[][][] savedMetadata = new int[PISTON_TEST_WIDTH][PISTON_TEST_HEIGHT][PISTON_TEST_LENGTH];
+		for (int x = 0; x < PISTON_TEST_WIDTH; x++) {
+			for (int y = 0; y < PISTON_TEST_HEIGHT; y++) {
+				for (int z = 0; z < PISTON_TEST_LENGTH; z++) {
+					savedBlocks[x][y][z] = world.getBlockId(pasteX + x, pasteY + y, pasteZ + z);
+					savedMetadata[x][y][z] = world.method_1778(pasteX + x, pasteY + y, pasteZ + z);
+					world.method_201(pasteX + x, pasteY + y, pasteZ + z, 0, 0);
+				}
+			}
+		}
+
+		try {
+			state.offset.set(pasteX, pasteY, pasteZ);
+
+			SchematicPaste.write(world, state);
+
+			check("the piston whose torch is written after it is still a piston",
+					world.getBlockId(pasteX + 1, pasteY + 1, pasteZ + 1), PISTON);
+			check("and still out, the way it was saved",
+					world.method_1778(pasteX + 1, pasteY + 1, pasteZ + 1), EXTENDED + SIDE_UP);
+			check("with its arm on the end of it",
+					world.getBlockId(pasteX + 1, pasteY + 2, pasteZ + 1), PISTON_HEAD);
+			check("and the torch that holds it out is there to hold it",
+					world.getBlockId(pasteX + 1, pasteY + 1, pasteZ + 2), LIT_REDSTONE_TORCH);
+
+			check("a piston with nothing holding it out took its arm in with it",
+					world.getBlockId(pasteX + 3, pasteY + 2, pasteZ + 1), 0);
+		} finally {
+			for (int x = 0; x < PISTON_TEST_WIDTH; x++) {
+				for (int y = 0; y < PISTON_TEST_HEIGHT; y++) {
+					for (int z = 0; z < PISTON_TEST_LENGTH; z++) {
+						world.method_201(pasteX + x, pasteY + y, pasteZ + z,
+								savedBlocks[x][y][z], savedMetadata[x][y][z]);
+					}
+				}
+			}
+			state.needsUpdate = true;
+		}
+
+		Log.info("SMOKETEST: --- pasting a piston that is out done ---");
+	}
+
+	/**
+	 * The paste gate with nothing loaded, which is what the button shows at the moment the mod is
+	 * first able to open a screen at all. Only ever one answer here, and it is worth saying out loud
+	 * that having no world lands on "nothing to paste" rather than on anything about servers.
+	 */
+	private static void runPasteGateTests(Minecraft mc) {
+		Log.info("SMOKETEST: --- paste, with nothing loaded ---");
+		checkText("with no schematic there is nothing to paste",
+				SchematicPaste.availability(mc).name(), SchematicPaste.Availability.NO_SCHEMATIC.name());
+		check("and asking for one anyway is refused", SchematicPaste.paste(mc), SchematicPaste.REFUSED);
+	}
+
+	/**
+	 * Pasting: what it writes, what it leaves alone, and that the gate really is in front of it.
+	 *
+	 * <p>The gate is shut here either way - a plain dev run has no creative mode in it at all, and a
+	 * run with BHCreative dropped alongside has one and is not in it - so the refusal is checked
+	 * through the same call the button makes, and the writing underneath is then driven directly,
+	 * which is the only way to reach it at all in the first of those two. What happens with the gate
+	 * open is {@link #runCreativePasteTests}, which needs the second.
+	 *
+	 * <p>The schematic is parked over an emptied box of its own with one block left standing in a
+	 * cell it wants nothing in. That block surviving is the whole difference between pasting a build
+	 * and pasting a box of air, and it is not something a count of blocks written could show.
+	 *
+	 * <p>Puts the world and the ghost back where it found them.
+	 */
+	private static void runPasteTests(Minecraft mc) {
+		SchematicaState state = Schematica.STATE;
+		if (state.schematic == null || mc.player == null) {
+			Log.info("SMOKETEST: no schematic loaded, skipping the paste checks");
+			return;
+		}
+
+		Log.info("SMOKETEST: --- paste ---");
+		World world = mc.world;
+		Schematic schematic = state.schematic.getSchematic();
+
+		// A plain dev run has no creative mode in it at all, since the mod that adds one is not
+		// installed; a run with BHCreative in it has one and is not in it. Both are a greyed-out
+		// button with a different line under it, and which one this is decides the rest of the checks.
+		boolean creativeMod = CreativeMode.isInstalled();
+		Log.info("SMOKETEST: BHCreative is " + (creativeMod ? "installed" : "not installed"));
+		checkText("pasting says which of the two it is short of",
+				SchematicPaste.availability(mc).name(),
+				(creativeMod ? SchematicPaste.Availability.NOT_CREATIVE
+						: SchematicPaste.Availability.NO_CREATIVE_MOD).name());
+
+		int width = schematic.getWidth();
+		int height = schematic.getHeight();
+		int length = schematic.getLength();
+
+		int savedX = state.offset.x;
+		int savedY = state.offset.y;
+		int savedZ = state.offset.z;
+		boolean savedUpdate = state.needsUpdate;
+
+		// Above the ghost and clear of the structure it was cut from, so nothing in this box belongs
+		// to anything else.
+		int pasteX = savedX;
+		int pasteY = savedY + PASTE_TEST_HEIGHT;
+		int pasteZ = savedZ;
+
+		int[][][] savedBlocks = new int[width][height][length];
+		int[][][] savedMetadata = new int[width][height][length];
+		for (int x = 0; x < width; x++) {
+			for (int y = 0; y < height; y++) {
+				for (int z = 0; z < length; z++) {
+					savedBlocks[x][y][z] = world.getBlockId(pasteX + x, pasteY + y, pasteZ + z);
+					savedMetadata[x][y][z] = world.method_1778(pasteX + x, pasteY + y, pasteZ + z);
+				}
+			}
+		}
+
+		try {
+			for (int x = 0; x < width; x++) {
+				for (int y = 0; y < height; y++) {
+					for (int z = 0; z < length; z++) {
+						world.method_201(pasteX + x, pasteY + y, pasteZ + z, 0, 0);
+					}
+				}
+			}
+
+			check("the schematic wants nothing in the witness cell", schematic.getBlockId(1, 1, 1), 0);
+			world.method_201(pasteX + 1, pasteY + 1, pasteZ + 1, COBBLESTONE, 0);
+			state.offset.set(pasteX, pasteY, pasteZ);
+
+			// The button's own call, which has to refuse: without creative mode there is no paste.
+			check("pasting is refused with no creative mode to be in",
+					SchematicPaste.paste(mc), SchematicPaste.REFUSED);
+			check("and a refusal writes nothing at all",
+					world.getBlockId(pasteX, pasteY, pasteZ), 0);
+
+			// The writing on its own, which is what the button would have reached past the gate.
+			int placed = SchematicPaste.write(world, state);
+			int wanted = 0;
+			for (int x = 0; x < width; x++) {
+				for (int y = 0; y < height; y++) {
+					for (int z = 0; z < length; z++) {
+						if (schematic.getBlockId(x, y, z) != 0) {
+							wanted++;
+						}
+					}
+				}
+			}
+			check("the paste wrote every block the schematic asks for", placed, wanted);
+
+			int wrong = 0;
+			for (int x = 0; x < width; x++) {
+				for (int y = 0; y < height; y++) {
+					for (int z = 0; z < length; z++) {
+						int id = schematic.getBlockId(x, y, z);
+						if (id == 0) {
+							continue;
+						}
+						if (world.getBlockId(pasteX + x, pasteY + y, pasteZ + z) != id
+								|| world.method_1778(pasteX + x, pasteY + y, pasteZ + z)
+										!= schematic.getMetadata(x, y, z)) {
+							wrong++;
+						}
+					}
+				}
+			}
+			check("and every one of them is standing, turned the way it was", wrong, 0);
+
+			// Named individually as well, so a failure says which part of a schematic stopped coming
+			// across rather than only that the count was off.
+			check("the floor came across", world.getBlockId(pasteX, pasteY, pasteZ), GOLD);
+			check("the stairs came across",
+					world.getBlockId(pasteX + 2, pasteY + 1, pasteZ + 2), WOOD_STAIRS);
+			check("and the torch is still facing the way it was saved",
+					world.method_1778(pasteX + 3, pasteY + 1, pasteZ + 2), worldTorchMetadata);
+			check("a cell the schematic leaves empty is left alone",
+					world.getBlockId(pasteX + 1, pasteY + 1, pasteZ + 1), COBBLESTONE);
+
+			BlockEntity pasted = world.method_1777(pasteX + 1, pasteY + 1, pasteZ + 4);
+			if (pasted instanceof SignBlockEntity) {
+				checkText("the sign came across with its text", ((SignBlockEntity) pasted).texts[0], "SMOKE");
+				checkText("both lines of it", ((SignBlockEntity) pasted).texts[1], "TEST");
+			} else {
+				fail("no sign block entity where the schematic has one, got " + pasted, null);
+			}
+
+			// The schematic goes on drawing itself out of its own copy: handing a block entity over
+			// rather than copying it would empty every sign in the overlay the moment it was pasted.
+			BlockEntity ghost = schematic.getBlockEntity(1, 1, 4);
+			checkTrue("the schematic kept a sign of its own", ghost instanceof SignBlockEntity && ghost != pasted);
+			if (ghost instanceof SignBlockEntity) {
+				checkText("with its text still on it", ((SignBlockEntity) ghost).texts[0], "SMOKE");
+			}
+
+			if (creativeMod) {
+				runCreativePasteTests(mc, pasteX, pasteY, pasteZ, wanted);
+			}
+		} finally {
+			for (int x = 0; x < width; x++) {
+				for (int y = 0; y < height; y++) {
+					for (int z = 0; z < length; z++) {
+						world.method_201(pasteX + x, pasteY + y, pasteZ + z,
+								savedBlocks[x][y][z], savedMetadata[x][y][z]);
+					}
+				}
+			}
+			state.offset.set(savedX, savedY, savedZ);
+			state.needsUpdate = savedUpdate;
+		}
+
+		runPasteButtonTests(mc, false);
+		Log.info("SMOKETEST: --- paste done ---");
+	}
+
+	/**
+	 * The other side of the gate: what happens when there really is a creative mode and the player
+	 * really is in it.
+	 *
+	 * <p>Only reached in a game with BHCreative installed alongside, which no plain dev run is - this
+	 * mod neither ships it nor compiles against it. Install it and this runs, and it is the only
+	 * check there is that the bridge to it still reaches: that bridge is a class name and a method
+	 * name held in two strings, and nothing about a build would ever notice either going stale.
+	 *
+	 * <p>Runs with the ghost already parked over the box its caller emptied, and puts creative mode
+	 * back off on the way out.
+	 */
+	private static void runCreativePasteTests(Minecraft mc, int pasteX, int pasteY, int pasteZ, int wanted) {
+		SchematicaState state = Schematica.STATE;
+		World world = mc.world;
+		Schematic schematic = state.schematic.getSchematic();
+
+		Log.info("SMOKETEST: --- paste, in creative mode ---");
+		if (!setCreative(mc, true)) {
+			return;
+		}
+
+		try {
+			checkTrue("BHCreative says the player is in creative mode", CreativeMode.isCreative(mc.player));
+			checkText("so pasting is on offer", SchematicPaste.availability(mc).name(),
+					SchematicPaste.Availability.READY.name());
+			runPasteButtonTests(mc, true);
+
+			// Emptied again, and the witness put back: what the write above left standing would
+			// otherwise be answering for this one.
+			for (int x = 0; x < schematic.getWidth(); x++) {
+				for (int y = 0; y < schematic.getHeight(); y++) {
+					for (int z = 0; z < schematic.getLength(); z++) {
+						world.method_201(pasteX + x, pasteY + y, pasteZ + z, 0, 0);
+					}
+				}
+			}
+			world.method_201(pasteX + 1, pasteY + 1, pasteZ + 1, COBBLESTONE, 0);
+
+			// The button's own call again, this time all the way through.
+			check("the paste the button makes writes the schematic", SchematicPaste.paste(mc), wanted);
+			check("the floor is down", world.getBlockId(pasteX, pasteY, pasteZ), GOLD);
+			check("and the cell it wants nothing in is untouched even now",
+					world.getBlockId(pasteX + 1, pasteY + 1, pasteZ + 1), COBBLESTONE);
+
+			BlockEntity sign = world.method_1777(pasteX + 1, pasteY + 1, pasteZ + 4);
+			if (sign instanceof SignBlockEntity) {
+				checkText("with the sign written on", ((SignBlockEntity) sign).texts[0], "SMOKE");
+			} else {
+				fail("no sign block entity after a creative paste, got " + sign, null);
+			}
+		} finally {
+			setCreative(mc, false);
+		}
+
+		checkText("and stepping back out of creative mode closes it again",
+				SchematicPaste.availability(mc).name(), SchematicPaste.Availability.NOT_CREATIVE.name());
+		Log.info("SMOKETEST: --- paste, in creative mode done ---");
+	}
+
+	/**
+	 * Steps the player in or out of creative mode through BHCreative's own setter - the same door
+	 * the mod itself opens it with. Test-only: reading the flag is the mod's business, setting it is
+	 * not, so this lives here rather than in {@code compat/CreativeMode}.
+	 */
+	private static boolean setCreative(Minecraft mc, boolean creative) {
+		try {
+			Class<?> creativePlayer = Class.forName("paulevs.bhcreative.interfaces.CreativePlayer");
+			creativePlayer.getMethod("creative_setCreative", boolean.class).invoke(mc.player, creative);
+			return true;
+		} catch (ReflectiveOperationException | RuntimeException exception) {
+			fail("could not step the player " + (creative ? "into" : "out of")
+					+ " creative mode through BHCreative", exception);
+			return false;
+		}
+	}
+
+	/**
+	 * The button the player actually meets this on. Rendered for real rather than asked, because
+	 * whether it is live is settled by the frame rather than by the screen being opened - and because
+	 * the tooltip under it is drawing code that only ever runs with a mouse over the button, which no
+	 * screenshot can be made to arrange.
+	 */
+	private static void runPasteButtonTests(Minecraft mc, boolean expected) {
+		Screen before = mc.currentScreen;
+		SchematicControlScreen screen = new SchematicControlScreen();
+		mc.setScreen(screen);
+
+		ButtonWidget paste = buttonNamed(screen, Translations.get("schematic.paste"));
+		if (paste == null) {
+			fail("the move screen has no paste button on it", null);
+			mc.setScreen(before);
+			return;
+		}
+
+		checkTrue("opening the move screen leaves the paste button alone", paste.active);
+		// Over the button, so the tooltip is drawn as well as the button greyed.
+		screen.render(paste.x + 1, paste.y + 1, 0.0F);
+		checkTrue(expected
+				? "and a frame in creative mode leaves it live"
+				: "and a frame that cannot paste greys it out", paste.active == expected);
+
+		mc.setScreen(before);
+	}
+
+	/** The first button on a screen carrying this label, or null when there is none. */
+	private static ButtonWidget buttonNamed(Screen screen, String text) {
+		try {
+			java.lang.reflect.Field field = Screen.class.getDeclaredField("buttons");
+			field.setAccessible(true);
+			for (Object button : (List<?>) field.get(screen)) {
+				if (button instanceof ButtonWidget && text.equals(((ButtonWidget) button).text)) {
+					return (ButtonWidget) button;
+				}
+			}
+			return null;
+		} catch (ReflectiveOperationException | RuntimeException exception) {
+			fail("could not reach the buttons on " + screen.getClass().getSimpleName(), exception);
+			return null;
 		}
 	}
 
