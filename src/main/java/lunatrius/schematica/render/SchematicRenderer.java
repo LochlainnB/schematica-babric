@@ -126,6 +126,20 @@ public class SchematicRenderer {
 	}
 
 	/**
+	 * How many blocks the overlay is currently drawing as still to be placed, across the whole
+	 * schematic. Read off the compiled geometry rather than worked out again, so it answers what is
+	 * really on screen - which is the only way to tell an overlay built against a world that had not
+	 * arrived yet from one that is right.
+	 */
+	public int getGhostBlockCount() {
+		int total = 0;
+		for (Region region : this.regions) {
+			total += region.ghostBlocks;
+		}
+		return total;
+	}
+
+	/**
 	 * Marks only the region holding one schematic-local position, which is all a block changing in
 	 * the world costs: the overlay compares that one cell against the world and nothing else reads
 	 * it, so a neighbouring region cannot be affected.
@@ -146,6 +160,40 @@ public class SchematicRenderer {
 		}
 
 		this.regions[(regionX * this.regionsY + regionY) * this.regionsZ + regionZ].dirty = true;
+	}
+
+	/**
+	 * Marks every region a box of schematic-local positions touches. A chunk arriving from a server
+	 * lands here: it brings a whole column of world at once, and the overlay is drawn by comparing
+	 * itself against that world, so the part of it standing in the new chunk is now out of date.
+	 */
+	public void invalidateBox(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
+		if (!this.gridMatches(this.state.schematic)) {
+			// No grid to mark yet. The next frame lays one out and builds all of it regardless.
+			this.state.needsUpdate = true;
+			return;
+		}
+
+		if (maxX < 0 || maxY < 0 || maxZ < 0
+				|| minX >= this.gridWidth || minY >= this.gridHeight || minZ >= this.gridLength) {
+			// Somewhere else in the world entirely, which is where most chunks are.
+			return;
+		}
+
+		int fromX = Math.max(minX, 0) / REGION_SIZE;
+		int fromY = Math.max(minY, 0) / REGION_SIZE;
+		int fromZ = Math.max(minZ, 0) / REGION_SIZE;
+		int toX = Math.min(maxX, this.gridWidth - 1) / REGION_SIZE;
+		int toY = Math.min(maxY, this.gridHeight - 1) / REGION_SIZE;
+		int toZ = Math.min(maxZ, this.gridLength - 1) / REGION_SIZE;
+
+		for (int x = fromX; x <= toX; x++) {
+			for (int y = fromY; y <= toY; y++) {
+				for (int z = fromZ; z <= toZ; z++) {
+					this.regions[(x * this.regionsY + y) * this.regionsZ + z].dirty = true;
+				}
+			}
+		}
 	}
 
 	/**
@@ -199,7 +247,7 @@ public class SchematicRenderer {
 			this.rebuildDirtyRegions(minecraft, schematic);
 
 			for (Region region : this.regions) {
-				if (region.visible && region.hasBlocks) {
+				if (region.visible && region.ghostBlocks > 0) {
 					GL11.glCallList(region.blockList);
 				}
 			}
@@ -428,7 +476,7 @@ public class SchematicRenderer {
 			GL11.glEndList();
 		}
 
-		region.hasBlocks = ghostBlocks > 0;
+		region.ghostBlocks = ghostBlocks;
 		this.compileOverlay(region);
 	}
 
@@ -682,7 +730,8 @@ public class SchematicRenderer {
 		final int overlayList;
 
 		boolean dirty = true;
-		boolean hasBlocks;
+		/** Blocks in this region the world does not have, counted as the geometry was compiled. */
+		int ghostBlocks;
 		boolean hasOverlay;
 		boolean visible = true;
 

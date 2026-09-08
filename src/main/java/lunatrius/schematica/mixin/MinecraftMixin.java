@@ -1,6 +1,7 @@
 package lunatrius.schematica.mixin;
 
 import lunatrius.schematica.EasyPlace;
+import lunatrius.schematica.SchematicMemory;
 import lunatrius.schematica.Schematica;
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.player.PlayerEntity;
@@ -50,9 +51,32 @@ public abstract class MinecraftMixin {
 		return EasyPlace.useRepeatDivisor(divisor);
 	}
 
+	/**
+	 * Starting a single player world, named by the folder it is saved in. Taken here rather than off
+	 * the world itself because every save calls itself "level" inside; the folder is what tells two
+	 * of them apart.
+	 */
+	@Inject(method = "method_2120(Ljava/lang/String;Ljava/lang/String;J)V", at = @At("HEAD"))
+	private void schematica$onStartWorld(String saveName, String levelName, long seed, CallbackInfo info) {
+		SchematicMemory.onSingleplayerWorld(saveName);
+	}
+
 	/** Joining or leaving a world invalidates the placement of anything already loaded. */
 	@Inject(method = "method_2115(Lnet/minecraft/world/World;Ljava/lang/String;Lnet/minecraft/entity/player/PlayerEntity;)V", at = @At("HEAD"))
 	private void schematica$onWorldChanged(World world, String message, PlayerEntity player, CallbackInfo info) {
-		Schematica.STATE.onWorldChanged();
+		Schematica.onWorldChanged();
+	}
+
+	/**
+	 * The far end of the same swap, once the world has actually been handed over. In single player
+	 * that is only after the spawn area has been prepared, which is done with the game ticking and
+	 * drawing underneath it - so a world can be there to be seen for seconds before it is there to
+	 * be read, and a tick cannot tell the difference on its own.
+	 */
+	@Inject(method = "method_2115(Lnet/minecraft/world/World;Ljava/lang/String;Lnet/minecraft/entity/player/PlayerEntity;)V", at = @At("RETURN"))
+	private void schematica$onWorldReady(World world, String message, PlayerEntity player, CallbackInfo info) {
+		if (world != null) {
+			SchematicMemory.onWorldReady();
+		}
 	}
 }

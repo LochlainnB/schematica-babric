@@ -1,8 +1,11 @@
 package lunatrius.schematica.mixin;
 
 import lunatrius.schematica.HotbarRestock;
+import lunatrius.schematica.Schematica;
 import net.minecraft.class_325;
+import net.minecraft.class_441;
 import net.minecraft.client.network.ClientNetworkHandler;
+import net.minecraft.network.packet.play.ChunkDataPacket;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -18,5 +21,28 @@ public abstract class ClientNetworkHandlerMixin {
 	@Inject(method = "method_1429(Lnet/minecraft/class_325;)V", at = @At("HEAD"))
 	private void schematica$onTransaction(class_325 packet, CallbackInfo info) {
 		HotbarRestock.onTransaction(packet.field_1222, packet.field_1224);
+	}
+
+	/**
+	 * A chunk of world arriving. The schematic overlay draws itself by comparing the schematic
+	 * against the world, and a chunk brings a slab of that world in one packet without ever
+	 * reporting the blocks in it - so the part of the overlay standing in it has to be told.
+	 */
+	@Inject(method = "handleChunkData(Lnet/minecraft/network/packet/play/ChunkDataPacket;)V", at = @At("RETURN"))
+	private void schematica$onChunkData(ChunkDataPacket packet, CallbackInfo info) {
+		Schematica.STATE.onWorldChunkLoaded(
+				packet.x, packet.y, packet.z, packet.sizeX, packet.sizeY, packet.sizeZ);
+	}
+
+	/**
+	 * Several blocks in one chunk changing at once. A server sends one of these rather than a packet
+	 * each whenever more than one block in a chunk moves in a tick, which with other people building
+	 * alongside you is most of them - and they are written straight into the chunk, so the single
+	 * block hook in {@code WorldMixin} never sees any of it.
+	 */
+	@Inject(method = "method_1468(Lnet/minecraft/class_441;)V", at = @At("RETURN"))
+	private void schematica$onMultiBlockChange(class_441 packet, CallbackInfo info) {
+		Schematica.STATE.onWorldBlocksChanged(
+				packet.field_2153, packet.field_2154, packet.field_2155, packet.field_2158);
 	}
 }

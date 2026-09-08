@@ -1,12 +1,18 @@
 package lunatrius.schematica.debug;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Properties;
 
 import lunatrius.schematica.EasyPlace;
 import lunatrius.schematica.HotbarRestock;
 import lunatrius.schematica.MaterialList;
+import lunatrius.schematica.SchematicMemory;
 import lunatrius.schematica.Schematica;
 import lunatrius.schematica.SchematicaConfig;
 import lunatrius.schematica.SchematicaState;
@@ -62,6 +68,22 @@ public final class SmokeTest {
 	 * clicks are applied on the spot, and none of the asking and answering happens at all.
 	 */
 	private static final boolean MULTIPLAYER = Boolean.getBoolean("schematica.smoketest.multiplayer");
+	/**
+	 * The second half of a two-run check. A game can leave a note about a world and come back to it
+	 * inside one run, but it cannot start cold - and starting cold is when the world is handed over
+	 * in a different order, so it is the only way to see what a player really gets.
+	 */
+	private static final boolean RESTORE_TEST = Boolean.getBoolean("schematica.smoketest.restore");
+	/** The save folder the test world lives in, which is also how remembering tells it apart. */
+	private static final String WORLD_NAME = "schematica-smoketest";
+	/** Where the schematic is parked before logging off, so the place it comes back to is its own. */
+	private static final int REJOIN_X = -321;
+	private static final int REJOIN_Y = 72;
+	private static final int REJOIN_Z = 654;
+	/** The same again on a server, where the world is only ever a stub of the one being played. */
+	private static final int SERVER_REJOIN_X = -111;
+	private static final int SERVER_REJOIN_Y = 66;
+	private static final int SERVER_REJOIN_Z = 222;
 	private static final String SERVER_HOST = "localhost";
 	private static final int SERVER_PORT = 25565;
 
@@ -132,12 +154,18 @@ public final class SmokeTest {
 	/** Frames the overlay may spend catching up after that before something is declared wrong. */
 	private static final int REBUILD_TIMEOUT_TICKS = 20 * 30;
 
-	private enum Phase { DATA, START_WORLD, WAIT_WORLD, BUILD, SAVE, LOAD, SHOOT, MULTIPLAYER, DONE }
+	/** Long enough to outlast the wait a schematic gets for a world that never says it is ready. */
+	private static final int RESTORE_WAIT_TICKS = 70;
+
+	private enum Phase { DATA, START_WORLD, WAIT_WORLD, BUILD, SAVE, LOAD, SHOOT, MULTIPLAYER, LEAVE, REJOIN, RESTORED, DONE }
 
 	private static Phase phase = Phase.DATA;
 	private static int ticks = 0;
 	private static int failures = 0;
 	private static int scene = 0;
+	private static int restoreStep = 0;
+	private static int restoredGhosts = -1;
+	private static int silentlyCleared = 0;
 
 	private static int baseX;
 	private static int baseY;
@@ -175,6 +203,7 @@ public final class SmokeTest {
 		switch (phase) {
 			case DATA:
 				if (mc.currentScreen instanceof TitleScreen && ticks > 20) {
+					useScratchMemory();
 					runDataTests();
 					runKeybindTests(mc);
 					runModMenuTests();
@@ -199,7 +228,7 @@ public final class SmokeTest {
 				ticks = 0;
 				// SelectWorldScreen installs this before starting a world; method_2120 needs it.
 				mc.interactionManager = new SingleplayerInteractionManager(mc);
-				mc.method_2120("schematica-smoketest", "SmokeTest", 1L);
+				mc.method_2120(WORLD_NAME, "SmokeTest", 1L);
 				Log.info("SMOKETEST: world creation returned");
 				return;
 
@@ -217,9 +246,29 @@ public final class SmokeTest {
 				if (mc.world != null && mc.player != null && ticks > 60) {
 					// method_2120 leaves whatever screen was open in place; close it so the world renders.
 					mc.setScreen(null);
-					phase = MULTIPLAYER ? Phase.MULTIPLAYER : Phase.BUILD;
+					phase = RESTORE_TEST ? Phase.RESTORED : (MULTIPLAYER ? Phase.MULTIPLAYER : Phase.BUILD);
 					ticks = 0;
 				}
+				return;
+
+			case LEAVE:
+				leaveWorld(mc);
+				return;
+
+			case REJOIN:
+				if (ticks > WORLD_TIMEOUT_TICKS) {
+					fail("timed out waiting for the world to come back", null);
+					finish(mc);
+					return;
+				}
+				if (mc.world != null && mc.player != null && ticks > 60) {
+					checkRejoin(mc);
+					finish(mc);
+				}
+				return;
+
+			case RESTORED:
+				runRestoredOverlayTests(mc);
 				return;
 
 			case MULTIPLAYER:
@@ -239,6 +288,8 @@ public final class SmokeTest {
 				return;
 
 			case LOAD:
+				runOrientationTests();
+				runMemoryTests(mc);
 				loadAndTransform(mc);
 				phase = Phase.SHOOT;
 				ticks = 0;
@@ -365,6 +416,37 @@ public final class SmokeTest {
 		runInfoHudTests();
 
 		Log.info("SMOKETEST: --- data layer done ---");
+	}
+
+	/**
+	 * Points remembering at a file of its own before any world is entered, so a run never reads or
+	 * writes what the player is really playing. The mod itself is left switched on and running from
+	 * the tick: the hooks that name a world and the poll that keeps the note up to date are then
+	 * the real ones, and the checks below are looking at what a player would get.
+	 */
+	private static void useScratchMemory() {
+		File file = memoryFile();
+		// A restore run is the second half of a pair and lives off what the first half left behind,
+		// so it is the one run that reads the note rather than starting without one.
+		if (!RESTORE_TEST && file.isFile() && !file.delete()) {
+			fail("could not clear " + file.getName(), null);
+			return;
+		}
+		SchematicMemory.load(file);
+	}
+
+	private static File memoryFile() {
+		return new File(Minecraft.getRunDirectory(), "config/schematica-worlds-smoketest.properties");
+	}
+
+	/**
+	 * Coming back to a world, as far as remembering is concerned: which world it is, and that it has
+	 * finished being handed over. A real return is told both by the mixins, one at each end of the
+	 * swap; a test driving it by hand has to say both as well.
+	 */
+	private static void comeBackTo(String world) {
+		SchematicMemory.onSingleplayerWorld(world);
+		SchematicMemory.onWorldReady();
 	}
 
 	/**
@@ -876,6 +958,7 @@ public final class SmokeTest {
 				joinX = mc.player.x;
 				joinY = mc.player.y;
 				joinZ = mc.player.z;
+				runServerMemoryTests();
 				nextStep(1);
 				return;
 
@@ -997,7 +1080,71 @@ public final class SmokeTest {
 						mc.world.getBlockId(airX, airY, airZ), GOLD);
 				check("no swap was turned down anywhere along the way", HotbarRestock.getRefusals(), 0);
 				Log.info("SMOKETEST: --- easy place on a server done ---");
+
+				runServerRestoreTests(mc);
 				finish(mc);
+		}
+	}
+
+	/**
+	 * The one part of remembering only a real server can answer for: whether the address dialled on
+	 * the way in reaches the world and names it. Nothing here sets that address - the connect screen
+	 * did. Everything else about remembering runs the same in single player and is checked there.
+	 */
+	private static void runServerMemoryTests() {
+		checkText("a server is known by the address dialled and the dimension",
+				SchematicMemory.getWorldId(), "server/" + SERVER_HOST + ":" + SERVER_PORT + "/0");
+	}
+
+	/**
+	 * Putting a schematic back into a world that came off a server. Single player proves the reading
+	 * and the writing; what only a server can show is a schematic being loaded into a world it does
+	 * not own - the client holds a stub of the server world, and the overlay is drawn against it.
+	 *
+	 * <p>Rather than log off and back on, which would mean waiting out a second handshake, the note
+	 * is written and the world let go of and picked straight back up. That is the same three calls a
+	 * real return makes, one after another instead of a minute apart.
+	 */
+	private static void runServerRestoreTests(Minecraft mc) {
+		SchematicaState state = Schematica.STATE;
+		Log.info("SMOKETEST: --- what was open on the server ---");
+
+		state.offset.set(SERVER_REJOIN_X, SERVER_REJOIN_Y, SERVER_REJOIN_Z);
+		state.rotateSchematic();
+		state.rotateSchematic();
+
+		SchematicMemory.onWorldLeaving();
+		state.clearSchematic();
+		SchematicMemory.load(memoryFile());
+		SchematicMemory.onServerConnect(SERVER_HOST, SERVER_PORT);
+		SchematicMemory.onWorldReady();
+		SchematicMemory.tick(mc);
+
+		checkTrue("the schematic left open on a server is put back", state.schematic != null);
+		checkText("and it is the same file", state.getLoadedName(), "smoketest-server.schematic");
+		check("standing where it was left, x", state.offset.x, SERVER_REJOIN_X);
+		check("standing where it was left, y", state.offset.y, SERVER_REJOIN_Y);
+		check("standing where it was left, z", state.offset.z, SERVER_REJOIN_Z);
+		check("turned the way it was left", state.getTurns(), 2);
+		checkTrue("into a world that belongs to a server rather than to us", mc.isWorldRemote());
+
+		// Leave the note a restore run needs. A lump of the world itself, saved and then parked
+		// exactly where it came from, is a schematic an overlay drawn correctly has nothing at all
+		// to draw - so anything it does draw on the way back in is something being got wrong. Taken
+		// from under the player, where a server world sits still.
+		int x = (int) Math.floor(mc.player.x) - 2;
+		int y = Math.max(1, (int) Math.floor(mc.player.y) - 8);
+		int z = (int) Math.floor(mc.player.z) - 2;
+		File area = new File(state.getSchematicDirectory(), "smoketest-server-area.schematic");
+		if (state.saveSchematic(area, new Vec3i(x, y, z), new Vec3i(x + 4, y + 4, z + 4))
+				&& state.loadSchematic(area)) {
+			state.offset.set(x, y, z);
+			state.setRenderingLayer(-1);
+			state.isRenderingSchematic = true;
+			Log.info("SMOKETEST: leaving a note for a restore run - " + state.getLoadedName()
+					+ " at " + x + ", " + y + ", " + z);
+		} else {
+			fail("could not save a lump of the server world to come back to", null);
 		}
 	}
 
@@ -1328,6 +1475,431 @@ public final class SmokeTest {
 		mc.options.thirdPerson = false;
 	}
 
+	/**
+	 * Logs off with a schematic open and comes straight back in, which is the whole feature the way
+	 * a player meets it. Nothing below is driven by hand: the mod is told a schematic is open the
+	 * same way any screen tells it, and everything after that is its own hooks and its own tick.
+	 */
+	private static void leaveWorld(Minecraft mc) {
+		SchematicaState state = Schematica.STATE;
+		File file = new File(state.getSchematicDirectory(), "smoketest.schematic");
+		if (!state.loadSchematic(file)) {
+			fail("loadSchematic returned false", null);
+			finish(mc);
+			return;
+		}
+
+		state.offset.set(REJOIN_X, REJOIN_Y, REJOIN_Z);
+		state.rotateSchematic();
+		state.setRenderingLayer(1);
+		Log.info("SMOKETEST: --- logging off with " + state.getLoadedName() + " open ---");
+
+		// method_2120 blocks for the whole of the world load with the game ticking underneath it,
+		// so the phase has to be set before it is called.
+		phase = Phase.REJOIN;
+		ticks = 0;
+
+		mc.setWorld(null);
+		checkTrue("leaving the world lets go of it", SchematicMemory.getWorldId() == null);
+		checkTrue("and closes the schematic on the way out", state.schematic == null);
+
+		mc.method_2120(WORLD_NAME, "SmokeTest", 1L);
+	}
+
+	/** What the player sees on the way back in. */
+	private static void checkRejoin(Minecraft mc) {
+		SchematicaState state = Schematica.STATE;
+		mc.setScreen(null);
+
+		Log.info("SMOKETEST: --- back in the world ---");
+		checkText("coming back names the same world",
+				SchematicMemory.getWorldId(), "singleplayer/" + WORLD_NAME + "/0");
+		checkTrue("the schematic that was open is open again", state.schematic != null);
+		checkText("and it is the same file", state.getLoadedName(), "smoketest.schematic");
+		check("standing where it was left, x", state.offset.x, REJOIN_X);
+		check("standing where it was left, y", state.offset.y, REJOIN_Y);
+		check("standing where it was left, z", state.offset.z, REJOIN_Z);
+		check("turned the way it was left", state.getTurns(), 1);
+		check("sliced the way it was left", state.renderingLayer, 1);
+		checkTrue("and showing, the way it was left", state.isRenderingSchematic);
+
+		// Leave behind the note the restore run needs: the schematic square on top of the structure
+		// this run built, so a cold start has a world that really does hold those blocks to draw
+		// itself against. Written out for us when the game shuts down at the end of the run.
+		File file = new File(state.getSchematicDirectory(), "smoketest.schematic");
+		if (state.loadSchematic(file)) {
+			state.offset.set(baseX, baseY, baseZ);
+			state.setRenderingLayer(-1);
+			state.isRenderingSchematic = true;
+			Log.info("SMOKETEST: leaving a note for a restore run - " + state.getLoadedName()
+					+ " at " + baseX + ", " + baseY + ", " + baseZ);
+		}
+	}
+
+	/**
+	 * The half of remembering that needs a game which has really been closed and opened again: not
+	 * whether the note was read, which is checked plenty of other ways, but whether what got drawn
+	 * from it is right.
+	 *
+	 * <p>The overlay is built by comparing the schematic against the world, so it is only ever as
+	 * good as the world underneath it at the moment it was built - and a world being handed over is
+	 * not the same world it settles into. Rather than trusting a count, the overlay is asked what it
+	 * is drawing, then made to build itself again now that everything has arrived, and the two
+	 * answers compared. They can only differ if the first one was drawn against a world that was
+	 * not there yet.
+	 */
+	private static void runRestoredOverlayTests(Minecraft mc) {
+		SchematicaState state = Schematica.STATE;
+		SchematicRenderer renderer = Schematica.getRenderer();
+		if (renderer == null || mc.player == null) {
+			fail("no renderer or no player in the restore run", null);
+			finish(mc);
+			return;
+		}
+
+		if (state.schematic != null && !MULTIPLAYER) {
+			// Stood back from the schematic and looking at it, so the rebuild budget reaches it and
+			// the screenshots show what is being talked about. Left alone on a server, which would
+			// have to be talked into the move and has no reason to agree.
+			mc.player.method_1341(state.offset.x + 2.5, state.offset.y + 6.0, state.offset.z - 9.0,
+					0.0F, 22.0F);
+		}
+
+		if (ticks < SETTLE_TICKS || renderer.isRebuilding()) {
+			if (ticks > REBUILD_TIMEOUT_TICKS) {
+				fail("the overlay never stopped rebuilding at step " + restoreStep, null);
+				finish(mc);
+			}
+			return;
+		}
+
+		switch (restoreStep) {
+			case 0:
+				Log.info("SMOKETEST: --- the overlay a cold start put back ---");
+				checkTrue("starting the game cold puts the schematic back", state.schematic != null);
+				if (state.schematic == null) {
+					finish(mc);
+					return;
+				}
+				Log.info("SMOKETEST: back with " + state.getLoadedName() + " at "
+						+ state.offset.x + ", " + state.offset.y + ", " + state.offset.z);
+
+				restoredGhosts = renderer.getGhostBlockCount();
+				screenshot(mc, 0);
+				// Work the comparison out again, against a world that has all arrived by now.
+				state.needsUpdate = true;
+				break;
+
+			case 1:
+				int settled = renderer.getGhostBlockCount();
+				Log.info("SMOKETEST: the restored overlay drew " + restoredGhosts
+						+ " block(s) as still to place; built again it draws " + settled);
+				screenshot(mc, 1);
+				check("what a cold start drew is what the world actually says", restoredGhosts, settled);
+				check("and the world here really does hold the whole schematic", settled, 0);
+
+				// Now the other half of it, and the half that has nothing to do with starting cold:
+				// change the world underneath the overlay without telling it. Writing into the chunk
+				// is what a chunk arriving amounts to - no block change, nothing announced, nothing
+				// for any hook to hear - which is exactly how an overlay goes quietly out of date.
+				Log.info("SMOKETEST: --- the overlay follows the world ---");
+				silentlyCleared = clearSilently(mc, state);
+				checkTrue("the world under the schematic can be changed without a word",
+						silentlyCleared > 0);
+				break;
+
+			case 2:
+				// What the overlay makes of the world now, before anything is asked to rebuild.
+				restoredGhosts = renderer.getGhostBlockCount();
+				screenshot(mc, 2);
+				state.needsUpdate = true;
+				break;
+
+			default:
+				int truth = renderer.getGhostBlockCount();
+				Log.info("SMOKETEST: " + silentlyCleared + " block(s) taken out from under the overlay "
+						+ "without telling it; it drew " + restoredGhosts
+						+ " as still to place, and built again it draws " + truth);
+				screenshot(mc, 3);
+				checkTrue("taking the world away really does leave something to draw", truth > 0);
+				check("the overlay notices the world changing underneath it", restoredGhosts, truth);
+				finish(mc);
+				return;
+		}
+
+		restoreStep++;
+		ticks = 0;
+	}
+
+	/**
+	 * Takes the bottom layer of the world out from under the schematic by writing straight into the
+	 * chunk, the way a chunk being filled in does it. Nothing is notified, so an overlay that only
+	 * ever hears about block changes has no way of knowing.
+	 */
+	private static int clearSilently(Minecraft mc, SchematicaState state) {
+		Schematic schematic = state.schematic.getSchematic();
+		int cleared = 0;
+
+		for (int x = 0; x < schematic.getWidth(); x++) {
+			for (int z = 0; z < schematic.getLength(); z++) {
+				if (schematic.getBlockId(x, 0, z) == 0) {
+					continue;
+				}
+				int worldX = state.offset.x + x;
+				int worldY = state.offset.y;
+				int worldZ = state.offset.z + z;
+				if (mc.world.getBlockId(worldX, worldY, worldZ) == 0) {
+					continue;
+				}
+				mc.world.method_214(worldX >> 4, worldZ >> 4)
+						.method_861(worldX & 15, worldY, worldZ & 15, 0, 0);
+				cleared++;
+			}
+		}
+		return cleared;
+	}
+
+	// --- what was open here ------------------------------------------------------------------
+
+	/**
+	 * The pair the mod writes down - a flip and a count of quarter turns - has to be able to say
+	 * what any run of rotations and mirrors did, because putting a schematic back means handing that
+	 * pair to a fresh copy and expecting the same building.
+	 */
+	private static void runOrientationTests() {
+		Log.info("SMOKETEST: --- orientation ---");
+		SchematicaState state = Schematica.STATE;
+		File file = new File(state.getSchematicDirectory(), "smoketest.schematic");
+
+		// r turns, m flips. Runs long enough to come back on themselves, so the pair is being kept
+		// rather than the clicks counted.
+		String[] runs = { "", "r", "rr", "rrr", "m", "mr", "mrr", "mrrr", "rm", "rrm", "rrrm",
+				"mrm", "rmr", "rrrmrrm", "mmm", "rrrr", "mrrrrm", "rmrmrmrm" };
+
+		for (String run : runs) {
+			if (!state.loadSchematic(file)) {
+				fail("loadSchematic returned false", null);
+				return;
+			}
+			for (int i = 0; i < run.length(); i++) {
+				if (run.charAt(i) == 'r') {
+					state.rotateSchematic();
+				} else {
+					state.mirrorSchematic();
+				}
+			}
+
+			int turns = state.getTurns();
+			boolean mirrored = state.isMirrored();
+			int[] worked = snapshot(state.schematic.getSchematic());
+
+			if (!state.loadSchematic(file)) {
+				fail("loadSchematic returned false", null);
+				return;
+			}
+			state.setOrientation(turns, mirrored);
+
+			checkTrue("\"" + (run.isEmpty() ? "-" : run) + "\" is put back by "
+					+ (mirrored ? "a flip and " : "") + turns + " turn(s)",
+					Arrays.equals(worked, snapshot(state.schematic.getSchematic())));
+		}
+
+		state.clearSchematic();
+	}
+
+	/** Every block and its metadata, flattened, so two schematics can be compared whole. */
+	private static int[] snapshot(Schematic schematic) {
+		int width = schematic.getWidth();
+		int height = schematic.getHeight();
+		int length = schematic.getLength();
+
+		int[] flat = new int[3 + width * height * length * 2];
+		flat[0] = width;
+		flat[1] = height;
+		flat[2] = length;
+
+		int index = 3;
+		for (int x = 0; x < width; x++) {
+			for (int y = 0; y < height; y++) {
+				for (int z = 0; z < length; z++) {
+					flat[index++] = schematic.getBlockId(x, y, z);
+					flat[index++] = schematic.getMetadata(x, y, z);
+				}
+			}
+		}
+		return flat;
+	}
+
+	/**
+	 * Logging off and coming back, which no single run of the game can really do - so the world is
+	 * named by hand from here on and the rest of it, the reading and the writing and the putting
+	 * back, is the same code a real return runs.
+	 */
+	private static void runMemoryTests(Minecraft mc) {
+		Log.info("SMOKETEST: --- what was open here ---");
+		SchematicaState state = Schematica.STATE;
+
+		// Nothing set this up: the mod named this world on its own when it was started, and has been
+		// watching it from the tick ever since. Everything after this drives the same code by hand,
+		// because a smoke test cannot log off and come back inside one run.
+		checkText("the world the mod has been watching is the one that was started",
+				SchematicMemory.getWorldId(), "singleplayer/" + WORLD_NAME + "/0");
+
+		File file = memoryFile();
+		SchematicMemory.load(file);
+
+		comeBackTo("memory-a");
+		SchematicMemory.tick(mc);
+		checkText("a world is known by its folder and its dimension",
+				SchematicMemory.getWorldId(), "singleplayer/memory-a/0");
+		checkTrue("nothing is put back in a world never played before", state.schematic == null);
+
+		File schematic = new File(state.getSchematicDirectory(), "smoketest.schematic");
+		if (!state.loadSchematic(schematic)) {
+			fail("loadSchematic returned false", null);
+			return;
+		}
+		state.offset.set(12, 34, -56);
+		state.rotateSchematic();
+		state.mirrorSchematic();
+		state.setRenderingLayer(1);
+		// Left hidden on purpose: a schematic that comes back showing when it was put away is as
+		// wrong as one that does not come back at all.
+		state.isRenderingSchematic = false;
+		int turns = state.getTurns();
+		boolean mirrored = state.isMirrored();
+
+		SchematicMemory.onWorldLeaving();
+		checkTrue("leaving a world writes down what was open in it", file.isFile() && file.length() > 0);
+
+		state.clearSchematic();
+		comeBackTo("memory-b");
+		SchematicMemory.tick(mc);
+		checkTrue("another world does not get the first one schematic", state.schematic == null);
+		SchematicMemory.onWorldLeaving();
+
+		// Reading the file back off disk is what a freshly started game does, so this is the part
+		// that says the mod remembers across being closed and not only across a logout.
+		state.clearSchematic();
+		SchematicMemory.load(file);
+		comeBackTo("memory-a");
+		SchematicMemory.tick(mc);
+		checkTrue("coming back to a world puts the schematic back", state.schematic != null);
+		checkText("the same file", state.getLoadedName(), "smoketest.schematic");
+		check("at the same x", state.offset.x, 12);
+		check("at the same y", state.offset.y, 34);
+		check("at the same z", state.offset.z, -56);
+		check("turned the same way", state.getTurns(), turns);
+		checkTrue("flipped the same way", state.isMirrored() == mirrored);
+		check("sliced to the same layer", state.renderingLayer, 1);
+		checkTrue("and still hidden, because that is how it was left", !state.isRenderingSchematic);
+		checkTrue("with the load list pointing at it",
+				"smoketest.schematic".equals(state.getSchematicFiles().get(state.selectedSchematic)));
+
+		// Nothing announces a schematic being moved, so the note is kept up to date while playing.
+		// That is also what is left behind by a game killed rather than closed.
+		state.offset.set(70, 71, 72);
+		for (int i = 0; i < 25; i++) {
+			SchematicMemory.tick(mc);
+		}
+		state.clearSchematic();
+		SchematicMemory.load(file);
+		comeBackTo("memory-a");
+		SchematicMemory.tick(mc);
+		check("a schematic moved while playing is written down where it stopped", state.offset.x, 70);
+
+		runSilentWorldMemoryTests(mc, file);
+		runDimensionMemoryTests(mc, file);
+	}
+
+	/**
+	 * A world that never says it has finished loading.
+	 *
+	 * <p>Every check above is driven with both ends of the world swap announced, which is what the
+	 * game on its own does. A game with two dozen other mods in it is not owed that: one of them can
+	 * reach the same swap and take the far end away, and nothing says so - the mod simply stops
+	 * being told that a world has arrived. That used to stop it remembering anything at all, in a
+	 * way no test could see, because every test said the far end out loud.
+	 *
+	 * <p>So this one does not. Nothing here calls {@code onWorldReady}: the world is named and then
+	 * left silent, exactly as it arrives in a game where something else got there first.
+	 */
+	private static void runSilentWorldMemoryTests(Minecraft mc, File file) {
+		SchematicaState state = Schematica.STATE;
+
+		// Let go of the world the checks above left attached, which also takes back the readiness
+		// the last comeBackTo announced.
+		SchematicMemory.onWorldLeaving();
+		state.clearSchematic();
+		SchematicMemory.load(file);
+
+		SchematicMemory.onSingleplayerWorld("memory-a");
+		SchematicMemory.tick(mc);
+		checkText("a world that never says it is ready is still worked out",
+				SchematicMemory.getWorldId(), "singleplayer/memory-a/0");
+		checkTrue("and nothing has been put into it yet", state.schematic == null);
+
+		for (int i = 0; i < RESTORE_WAIT_TICKS; i++) {
+			SchematicMemory.tick(mc);
+		}
+		checkTrue("but waiting for it to say so does not last forever", state.schematic != null);
+		check("and what was left there comes back", state.offset.x, 70);
+
+		// The half that actually broke: a world nobody announced was never written down either, so
+		// closing the game lost everything that happened in it.
+		state.offset.set(81, 82, 83);
+		for (int i = 0; i < 25; i++) {
+			SchematicMemory.tick(mc);
+		}
+		state.clearSchematic();
+		SchematicMemory.load(file);
+		comeBackTo("memory-a");
+		SchematicMemory.tick(mc);
+		check("and a silent world is written down like any other", state.offset.x, 81);
+	}
+
+	/**
+	 * The Nether keeps its own note. The coordinates a build sits at in the overworld are eight
+	 * times out and somewhere else entirely down there, so the two ends of a portal cannot share.
+	 */
+	private static void runDimensionMemoryTests(Minecraft mc, File file) {
+		SchematicaState state = Schematica.STATE;
+
+		Properties handMade = new Properties();
+		handMade.setProperty("singleplayer/memory-c/0.schematic", "smoketest.schematic");
+		handMade.setProperty("singleplayer/memory-c/0.x", "1");
+		handMade.setProperty("singleplayer/memory-c/0.y", "2");
+		handMade.setProperty("singleplayer/memory-c/0.z", "3");
+		handMade.setProperty("singleplayer/memory-c/-1.schematic", "smoketest.schematic");
+		handMade.setProperty("singleplayer/memory-c/-1.x", "99");
+		try (OutputStream stream = new FileOutputStream(file)) {
+			handMade.store(stream, "written by the smoke test");
+		} catch (IOException exception) {
+			fail("could not write a memory file by hand", exception);
+			return;
+		}
+
+		state.clearSchematic();
+		SchematicMemory.load(file);
+		comeBackTo("memory-c");
+		SchematicMemory.tick(mc);
+		checkTrue("a hand written file is read back", state.schematic != null);
+		check("and the overworld gets the overworld note, not the Nether one", state.offset.x, 1);
+
+		// Closing a schematic is the only way to be rid of it, so it has to be one.
+		state.clearSchematic();
+		SchematicMemory.onWorldLeaving();
+		SchematicMemory.load(file);
+		comeBackTo("memory-c");
+		SchematicMemory.tick(mc);
+		checkTrue("closing a schematic before leaving forgets it", state.schematic == null);
+
+		// Hand the real world back. The tick picks it up again next time round, and the rest of the
+		// run is watched the way any other session would be.
+		SchematicMemory.load(memoryFile());
+		comeBackTo(WORLD_NAME);
+	}
+
 	/** Holds the camera in front of both structures; re-applied every tick so gravity cannot drift it. */
 	private static void parkCamera(Minecraft mc) {
 		if (mc.player != null) {
@@ -1365,6 +1937,7 @@ public final class SmokeTest {
 				Log.info("SMOKETEST: scene 1 - rotated");
 				return;
 			case 1: // rotated -> mirror it back and slice to a single layer
+				runChunkArrivalTests();
 				state.rotateSchematic();
 				state.rotateSchematic();
 				state.rotateSchematic();
@@ -1434,6 +2007,11 @@ public final class SmokeTest {
 				return;
 			default:
 				mc.setScreen(null);
+				if (WORLD_TEST && !MULTIPLAYER) {
+					phase = Phase.LEAVE;
+					ticks = 0;
+					return;
+				}
 				finish(mc);
 		}
 	}
@@ -1514,6 +2092,34 @@ public final class SmokeTest {
 
 		Log.info("SMOKETEST: --- overlay updates ---");
 
+		// Several blocks in one chunk at once, which is how a server reports a tick in which more
+		// than one of them moved - anyone else building beside you, water running, leaves going.
+		// Nothing about them reaches the single block path, so they are their own hook.
+		SchematicRenderer renderer = Schematica.getRenderer();
+		checkTrue("nothing is waiting to be rebuilt to start with",
+				renderer != null && !renderer.isRebuilding());
+
+		int chunkX = state.offset.x >> 4;
+		int chunkZ = state.offset.z >> 4;
+		short[] corner = { packBlockChange(state.offset.x, state.offset.y, state.offset.z) };
+
+		state.onWorldBlocksChanged(chunkX, chunkZ, corner, 0);
+		checkTrue("a packet carrying no changes marks nothing",
+				!state.needsUpdate && !renderer.isRebuilding());
+
+		state.onWorldBlocksChanged(chunkX + 8, chunkZ + 8, corner, 1);
+		checkTrue("blocks changing in a chunk the overlay is nowhere near leave it alone",
+				!state.needsUpdate && !renderer.isRebuilding());
+
+		short[] above = { packBlockChange(state.offset.x, state.offset.y + 60, state.offset.z) };
+		state.onWorldBlocksChanged(chunkX, chunkZ, above, 1);
+		checkTrue("nor do blocks in the right chunk but over the top of it",
+				!state.needsUpdate && !renderer.isRebuilding());
+
+		state.onWorldBlocksChanged(chunkX, chunkZ, corner, 1);
+		checkTrue("a block under the overlay marks it for rebuilding", renderer.isRebuilding());
+		checkTrue("without invalidating all of it", !state.needsUpdate);
+
 		state.needsUpdate = false;
 		state.onWorldBlockChanged(state.offset.x + 1, state.offset.y + 1, state.offset.z + 1);
 		checkTrue("a block inside the overlay does not invalidate all of it", !state.needsUpdate);
@@ -1528,6 +2134,43 @@ public final class SmokeTest {
 		checkTrue("toggling keeps the cached geometry", !state.needsUpdate);
 
 		Log.info("SMOKETEST: --- overlay updates done ---");
+	}
+
+	/**
+	 * Whole chunks arriving, which is the other half of a world that turns up in pieces. Run from a
+	 * later scene than the checks above because it needs the same thing they do - nothing waiting to
+	 * be rebuilt - and each scene is only shot once the overlay has caught up.
+	 */
+	private static void runChunkArrivalTests() {
+		SchematicaState state = Schematica.STATE;
+		if (state.schematic == null) {
+			Log.info("SMOKETEST: no schematic loaded, skipping the chunk arrival checks");
+			return;
+		}
+
+		Log.info("SMOKETEST: --- chunks arriving ---");
+
+		// A chunk brings a slab of world in one packet and never reports the blocks in it, so the
+		// part of the overlay standing in it has to be told separately.
+		SchematicRenderer renderer = Schematica.getRenderer();
+		checkTrue("nothing is waiting to be rebuilt to start with",
+				renderer != null && !renderer.isRebuilding());
+
+		state.needsUpdate = false;
+		state.onWorldChunkLoaded(state.offset.x - 100, 0, state.offset.z - 100, 16, 128, 16);
+		checkTrue("a chunk nowhere near the overlay leaves it alone",
+				!state.needsUpdate && !renderer.isRebuilding());
+
+		state.onWorldChunkLoaded(state.offset.x, 0, state.offset.z, 16, 128, 16);
+		checkTrue("a chunk the overlay stands in marks it for rebuilding", renderer.isRebuilding());
+		checkTrue("without invalidating all of it", !state.needsUpdate);
+
+		Log.info("SMOKETEST: --- chunks arriving done ---");
+	}
+
+	/** The way the multi block change packet packs a position: X and Z in the chunk, then Y. */
+	private static short packBlockChange(int x, int y, int z) {
+		return (short) ((x & 0xF) << 12 | (z & 0xF) << 8 | (y & 0xFF));
 	}
 
 	/**
@@ -1904,6 +2547,31 @@ public final class SmokeTest {
 		type(control, "a12b"); // letters never reach the field
 		pressKey(control, '\r', Keyboard.KEY_RETURN);
 		check("typed X offset", state.offset.x, 12);
+
+		// Backspace rubs out one digit rather than the whole number. The field is showing an applied
+		// 12 and nothing is drawn as selected, so taking all of it away would look like it was eaten.
+		pressKey(control, '\b', Keyboard.KEY_BACK);
+		type(control, "5");
+		pressKey(control, '\r', Keyboard.KEY_RETURN);
+		check("backspace takes a digit off rather than the lot", state.offset.x, 15);
+
+		// And once a digit has gone the next one still types onto the end rather than over it.
+		pressKey(control, '\b', Keyboard.KEY_BACK);
+		pressKey(control, '\b', Keyboard.KEY_BACK);
+		type(control, "40");
+		pressKey(control, '\r', Keyboard.KEY_RETURN);
+		check("backspacing the number away leaves an empty field to type into", state.offset.x, 40);
+
+		// Nothing left to rub out, and Enter on an empty field keeps what was applied.
+		pressKey(control, '\b', Keyboard.KEY_BACK);
+		pressKey(control, '\b', Keyboard.KEY_BACK);
+		pressKey(control, '\b', Keyboard.KEY_BACK);
+		pressKey(control, '\r', Keyboard.KEY_RETURN);
+		check("and an empty field applied leaves the value alone", state.offset.x, 40);
+
+		type(control, "12");
+		pressKey(control, '\r', Keyboard.KEY_RETURN);
+		check("typing over an applied value still replaces it", state.offset.x, 12);
 
 		type(control, "999");
 		pressKey(control, (char) 27, Keyboard.KEY_ESCAPE);

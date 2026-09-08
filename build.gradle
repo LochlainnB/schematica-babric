@@ -35,13 +35,21 @@ loom {
 				vmArg '-Dschematica.smoketest=true'
 				// -Psmoketest=multiplayer joins a server on localhost instead of making a world, and
 				// checks easy place against it - the inventory swap only really exists on a server.
-				if (project.smoketest == 'multiplayer') {
+				if (project.smoketest == 'multiplayer' || project.smoketest == 'mprestore') {
 					vmArg '-Dschematica.smoketest.multiplayer=true'
 				}
 				// -Psmoketest=dataonly skips world generation and checks only the parts that do not
 				// need one: the data layer, the keybind registration and every screen.
 				if (project.smoketest == 'dataonly') {
 					vmArg '-Dschematica.smoketest.dataonly=true'
+				}
+				// -Psmoketest=restore is the second half of a two-run check: it starts cold into the
+				// world a previous run left a note about, which is the only way to see a schematic
+				// put back by a game that has actually been closed and opened again. =mprestore is
+				// the same thing against a server, where the world arrives over the network and the
+				// window in which it is not there yet is a real one.
+				if (project.smoketest == 'restore' || project.smoketest == 'mprestore') {
+					vmArg '-Dschematica.smoketest.restore=true'
 				}
 			}
 		}

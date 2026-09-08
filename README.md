@@ -7,7 +7,8 @@ A port of Lunatrius' Schematica 1.2.0.10 for Minecraft Beta 1.7.3 from Risugami'
 Load an MCEdit `.schematic` file and it is drawn over the world as a ghost you can build against,
 with colour-coded boxes showing what is missing or wrong. You can also select a region of the world
 and save it back out as a schematic. A material list says what the whole thing will take and counts
-down as you gather it, on a screen or in the corner of the screen while you build.
+down as you gather it, on a screen or in the corner of the screen while you build. What you had open
+is still open when you next log in, in the place you left it, for each world and server separately.
 
 ## Using it
 
@@ -37,6 +38,38 @@ Mod Menu installed.
 
 Hiding and showing keeps the cached geometry, so the toggle key is instant whatever the schematic
 costs to draw.
+
+### Picking up where you left off
+
+A schematic you had open is still open when you come back to it. Log off, shut the game down, come
+back a week later: the ghost is standing where you left it, turned the way you turned it and sliced
+to the layer you were working on - or hidden, if that is how you left it.
+
+Each world remembers its own, because a schematic pinned to a corner of one world means nothing in
+another. A single player world is told apart by its save folder and a server by the address you
+dialled, and the dimension counts as well - a build sits at coordinates in the overworld that are
+somewhere else entirely in the Nether, so the two ends of a portal keep separate notes.
+
+Closing the schematic is what forgets it, using the same **-- No schematic --** entry at the top of
+the load list you would use anyway. The note is kept up to date as you build rather than written
+only on the way out, so a game that is killed rather than closed still remembers. Notes live in
+`config/schematica-worlds.properties`, keyed by world; deleting a world's lines by hand forgets it
+too.
+
+The overlay compares the schematic against the world, so it is only ever as good as the world was
+when it was built - and a world does not always say when it changes. A single player world is
+prepared with the game already running: it ticks and draws for seconds while every block in it still
+reads as air. So a schematic waits for the world to say it has finished loading before it is put
+back, and on top of that the mod reads the world back one chunk column per tick and rebuilds
+anything that has changed underneath it. That covers a world arriving late, chunks coming and going
+as you walk about, and anything else that writes into a chunk without a word.
+
+That wait is a courtesy, not a condition. In a pack, another mod can reach the same world swap and
+leave the mod never told the world arrived; waiting on that would mean waiting forever, and a
+feature that quietly stops remembering anything is worse than one that redraws an overlay once. So
+a world is written down from the moment it can be named, whoever else is in the way, and a schematic
+that has been waiting three seconds for an announcement that is not coming goes back anyway - the
+watcher above is what makes that safe. It says so in the log when it happens.
 
 ### Layers
 
@@ -182,6 +215,10 @@ type over it and press **Enter**; **Tab** steps to the next one, applying the on
 and clicking anywhere else applies it too. **Escape** abandons what you were typing and gives the
 field up, so a second press closes the screen as usual.
 
+Typing a digit into a number you have just clicked replaces it, the way it does anywhere else.
+**Backspace** does not: it rubs out one digit and leaves the rest to be typed onto, since nothing is
+drawn as selected and taking the whole number away just looks like the field ate it.
+
 While a number is being typed it is drawn in yellow and nothing has moved yet - only a value that
 has been applied is white. The `[-] [step] [+]` buttons work exactly as they did, and the step
 button still cycles 1, 5, 15, 50, 250.
@@ -283,13 +320,14 @@ gui/         AxisScreen          routes clicks, keys and the tab order to the fo
              InfoHud               the same list in the corner of the screen, while playing
              four more Screens and a slider widget
 compat/      ModMenuIntegration  optional, loaded only when Mod Menu asks for it
-mixin/       seven small hooks (see below)
+mixin/       eight small hooks (see below)
 SchematicaState    everything about the current session
 SchematicaConfig   the render settings, and the keybinds it hands to vanilla
 EasyPlace          what a right click is allowed to do while easy place is on
 HotbarRestock      brings a block onto the hotbar, and waits for the server to agree
 Sightline          walks the blocks along the line of sight, nearest first
 MaterialList       what a schematic is built out of, counted against an inventory
+SchematicMemory    what was open in each world, kept between sessions
 BlockItems         which item puts a block down, and what you would go and fetch for it
 ```
 
@@ -301,13 +339,14 @@ work on the same way.
 
 | Mixin                       | Target                          | Why                                                            |
 | --------------------------- | ------------------------------- | -------------------------------------------------------------- |
-| `MinecraftMixin`            | `init`, `tick`, world change, use | initialise after the GL context exists; poll keys; reset state; easy place |
+| `MinecraftMixin`            | `init`, `tick`, world start, change and ready, use | initialise after the GL context exists; poll keys; name the single player world; reset state; hear that the world is readable, if anything says so; easy place |
 | `GameOptionsMixin`          | `GameOptions.load`              | add the mod's keys to the list Controls and options.txt walk    |
 | `GameRendererMixin`         | `class_555.method_1847` (weather) | the one point inside the world pass with the camera set up      |
 | `InGameHudMixin`            | `InGameHud.render`              | draw the info HUD after it, under whatever screen is open       |
 | `WorldMixin`                | `World.method_243`              | invalidate the overlay when a block inside it changes           |
 | `TranslationStorageAccessor`| `TranslationStorage`            | merge this mod's language file into the vanilla table           |
-| `ClientNetworkHandlerMixin` | the transaction packet          | hear whether the server took an inventory swap                  |
+| `ClientNetworkHandlerMixin` | transaction, chunk and multi-block packets | hear whether the server took an inventory swap; invalidate the overlay for changes the world never reports block by block |
+| `ConnectScreenMixin`        | `ConnectScreen` constructor     | note which server is being dialled, so its world can be told apart |
 
 The weather hook is the same place the ModLoader version attached itself: it runs after the terrain,
 entities and block outline are drawn, with the modelview matrix still in camera space.
@@ -327,6 +366,10 @@ Behaviour is otherwise the same as 1.2.0.10; these are deliberate changes:
 - **A material list.** The original drew a schematic and left working out what it would take to
   build entirely to you. This counts it, in the items you would go and fetch, and counts your
   inventory against it - on a screen, or in a HUD in the corner listing only what is still short.
+- **What was open is remembered per world.** The original loaded nothing on its own: every session
+  started empty, and putting a schematic back where it had been was done by hand from the numbers
+  you had written down. This writes the note itself, one per save folder, server address and
+  dimension.
 - **Rotate and mirror move block entities.** The original left signs and chests at their old
   coordinates after a transform.
 - **A fresh dimension backs `SchematicWorld`.** The original passed the live world's dimension to
@@ -336,7 +379,14 @@ Behaviour is otherwise the same as 1.2.0.10; these are deliberate changes:
   rendering, so schematics from later versions load with whatever b1.7.3 can represent. Saving drops
   them the same way rather than truncating the id into some other block.
 - **The overlay is invalidated by any block change inside it**, not just the local player's own
-  interactions, so it stays correct on servers.
+  interactions, so it stays correct on servers. That includes the two kinds a server never reports
+  block by block: whole chunks as they arrive, which is what lets a schematic be put back the moment
+  a server hands over the world, and the multi-block packet it sends whenever more than one block in
+  a chunk moved in a tick - which is most of them once other people are building alongside you.
+- **And the overlay reads the world back**, one chunk column per tick, so a change nobody announced
+  at all is noticed within a second or two rather than never. A world does not always say when it
+  changes: a single player world ticks and draws for seconds while it is still being handed over,
+  reading as air the whole time, and anything writing into a chunk directly says nothing either.
 - **The overlay is cached per region and rebuilt incrementally** (see above). The original compiled
   the whole schematic into a single display list and redid all of it whenever anything changed, and
   held the comparison boxes in growable vertex buffers with a hard cap that silently dropped any
@@ -392,6 +442,48 @@ for real and the HUD asked what it would draw, which is what joins the two halve
 screenshot of it over the world and scene 9 one of it behind an open screen, since whether it draws
 is not something the checks can say.
 
+Remembering what was open is checked from both ends. The name the mod gave the test world on its own
+is asserted to be the folder that world was started from, and on a server the address the connect
+screen was handed, since only a real join can answer for either. The rest is driven by hand, because
+one run of the game cannot really log off and come back: a schematic is left open in one world and
+not found in another, the file is read back off disk the way a freshly started game reads it, a
+schematic moved while playing is checked to have been written down where it stopped, a hand-written
+file says the overworld gets the overworld note and not the Nether one, and closing the schematic is
+checked to forget it. One world in the set is left deliberately silent - named and then never
+announced as ready, the way a world arrives when another mod has got to the swap first - and it is
+checked to be worked out anyway, to give up waiting rather than wait forever, and to be written down
+like any other; every other check says the announcement out loud, which is how a pack that swallowed
+it went unnoticed. Then the run does log off for real - it leaves the world with a schematic
+parked at coordinates of its own and starts the same world again, with nothing driven by hand from
+there on, and asks for the file, the place, the turn and the layer back.
+
+The multiplayer run does the same in the small: it leaves the world and picks it straight back up
+without waiting out a second handshake, which is the same three calls a real return makes, and asks
+for the schematic back into a world the client does not own.
+
+The turn is checked on its own, since the note holds a flip and a count of quarter turns rather than
+the clicks that got there: eighteen runs of rotations and mirrors, some long enough to come back on
+themselves, are each worked through, and the pair each lands on is handed to a fresh copy of that
+schematic, and the two compared block for block.
+
+Putting a schematic back is checked once more with the game actually closed and opened again, which
+is the only way to meet the order a cold start does things in. `-Psmoketest` leaves a note pointing
+at the structure it built; `-Psmoketest=restore` starts into that world, and rather than trusting a
+count it asks the overlay what it is drawing, makes it work the comparison out again now everything
+has arrived, and compares. The two can only differ if the first answer was drawn against a world
+that was not there yet. Then the world is taken out from under the overlay by writing into the chunk
+directly - no block change, nothing announced, nothing for any hook to hear - and the overlay has to
+have noticed on its own by the time it is asked again. `-Psmoketest=mprestore` is the same pair
+against a real server, coming back to a lump of the server's own world saved and parked exactly
+where it came from, so an overlay that is right has nothing at all to draw.
+
+The two kinds of change a server does not report block by block are checked against a schematic that
+has just been drawn, so anything marked was marked by the thing under test. A chunk landing on the
+overlay marks the part of it the chunk covers and one landing anywhere else marks nothing; a
+multi-block packet marks the block it names and nothing for one aimed at another chunk, at a
+position over the top of the overlay, or carrying no changes at all - which is what says the packed
+positions in it are being read as the positions they mean.
+
 `./gradlew runClient -Psmoketest=multiplayer` joins a b1.7.3 server on `localhost:25565` instead of
 making a world, and checks easy place against it. This is the only way to exercise the half of the
 inventory swap that exists on a server and nowhere else - the asking, and the being answered - since
@@ -415,9 +507,11 @@ driven the same way as a player would: click a row, press a key, and check that 
 
 The coordinate rows are driven the way a player drives them, through the screen's own key and mouse
 handlers: a value typed and applied with Enter, another with Tab, one abandoned with Escape, one
-clicked into and applied by clicking away, and a `[+]` press on top. One scene is left with a number
-half typed, which is both a screenshot of that state and a check that nothing moved until it was
-applied.
+clicked into and applied by clicking away, and a `[+]` press on top. Backspace gets its own run
+through: one digit off a number just clicked into, the digit typed back on, the whole number rubbed
+out and a new one typed into the empty field, and Enter on an empty field leaving the value alone.
+One scene is left with a number half typed, which is both a screenshot of that state and a check
+that nothing moved until it was applied.
 
 The last scenes swap in a 48x32x48 schematic with the camera inside it and turn the camera between
 shots, which is what covers the region grid and the frustum culling - the structure the earlier

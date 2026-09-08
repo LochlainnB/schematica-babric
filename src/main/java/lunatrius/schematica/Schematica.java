@@ -47,6 +47,7 @@ public class Schematica implements ClientModInitializer {
 
 		Translations.install();
 		CONFIG.load(new File(Minecraft.getRunDirectory(), "config/schematica.properties"));
+		SchematicMemory.load(new File(Minecraft.getRunDirectory(), "config/schematica-worlds.properties"));
 
 		if (CONFIG.migratedKeybinds) {
 			// The bindings were already added to mc.options by GameOptionsMixin, but the codes only
@@ -56,6 +57,15 @@ public class Schematica implements ClientModInitializer {
 
 		renderer = new SchematicRenderer();
 		Log.info("Schematica ready - schematics folder: " + schematicDirectory.getAbsolutePath());
+	}
+
+	/**
+	 * Joining a world, leaving one, or stepping between dimensions. What was open here is written
+	 * down before the state holding it is cleared out.
+	 */
+	public static void onWorldChanged() {
+		SchematicMemory.onWorldLeaving();
+		STATE.onWorldChanged();
 	}
 
 	public static Minecraft getMinecraft() {
@@ -79,6 +89,14 @@ public class Schematica implements ClientModInitializer {
 		// counting behind an open screen, which is what shows the material list screen's own HUD
 		// buttons taking effect while they are being clicked.
 		InfoHud.tick(mc);
+
+		// Ahead of the smoke test as well as the screen check: a world is joined with a screen still
+		// up, and putting the last schematic back is the first thing that should happen in it.
+		SchematicMemory.tick(mc);
+
+		// The overlay is only as good as the world it was compared against, and a world does not
+		// always say when it changes underneath one.
+		STATE.pollWorldUnderSchematic();
 
 		if (lunatrius.schematica.debug.SmokeTest.isEnabled()) {
 			lunatrius.schematica.debug.SmokeTest.tick(mc);

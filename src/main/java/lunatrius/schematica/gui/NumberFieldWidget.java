@@ -100,12 +100,19 @@ public class NumberFieldWidget extends TextFieldWidget {
 			return;
 		}
 
-		// Beta's field only ever appends, so typing over a value it is already showing would give
-		// "12" for a 1 with a 2 typed into it. The first edit clears it instead, which is what
-		// clicking a number and typing does everywhere else.
-		if (this.replacing && (isNumeric(character) || character == PASTE || keyCode == Keyboard.KEY_BACK)) {
-			this.replacing = false;
-			this.setText("");
+		if (this.replacing) {
+			if (isNumeric(character) || character == PASTE) {
+				// Beta's field only ever appends, so typing over a value it is already showing would
+				// give "12" for a 1 with a 2 typed into it. The first thing typed clears it instead,
+				// which is what clicking a number and typing does everywhere else.
+				this.replacing = false;
+				this.setText("");
+			} else if (keyCode == Keyboard.KEY_BACK) {
+				// Backspace is the exception. Nothing is drawn as selected, so taking the whole
+				// number away looks like the field ate it - it rubs out the last digit and leaves
+				// the rest to be typed onto, which is what a backspace looks like it should do.
+				this.replacing = false;
+			}
 		}
 
 		super.keyPressed(character, keyCode);
