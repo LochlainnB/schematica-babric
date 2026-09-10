@@ -201,6 +201,23 @@ public final class BlockItems {
 		return blockId;
 	}
 
+	/**
+	 * Whether anything at all puts this block down, as against the game making it: the head of an
+	 * extended piston comes out of the piston, fire is lit, a portal is struck.
+	 *
+	 * <p>Water and lava are placeable, a bucket being a way of carrying them about, whatever
+	 * survival makes of the ones already standing in a pool - which is {@link #materialFor}'s
+	 * question, and is asked of a block and its metadata together rather than of the block alone.
+	 */
+	public static boolean isPlaceable(int blockId) {
+		for (int[] row : MATERIALS) {
+			if (row[0] == blockId) {
+				return row[1] > 0;
+			}
+		}
+		return itemFor(blockId) > 0;
+	}
+
 	public static Item itemAt(int itemId) {
 		return itemId > 0 && itemId < Item.ITEMS.length ? Item.ITEMS[itemId] : null;
 	}

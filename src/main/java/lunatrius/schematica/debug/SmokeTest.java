@@ -139,6 +139,8 @@ public final class SmokeTest {
 	/** The metadata bit the top half of a door carries, which no item places. */
 	private static final int DOOR_TOP = 8;
 	private static final int PISTON_HEAD = 34;
+	/** The block a piston is halfway through pushing, which is another one nobody put there. */
+	private static final int MOVING_PISTON = 36;
 	/** The metadata bit a piston carries while it is extended, and its head is out. */
 	private static final int EXTENDED = 8;
 	private static final int FLOWING_WATER = 8;
@@ -180,6 +182,15 @@ public final class SmokeTest {
 	private static final int DELETE_TIMEOUT_TICKS = 101;
 	/** And long enough to be past the moment a fresh one refuses to be answered in. */
 	private static final int DELETE_DELAY_TICKS = 12;
+
+	/**
+	 * The schematic the replace screen is shot over to show what no longer gets a row. It holds a
+	 * piston with its head out, another block a piston is halfway through pushing, a redstone torch
+	 * saved with the circuit on and a second saved with it off, and a plain torch beside them.
+	 */
+	private static final String SWITCHED_FILE = "smoketest-switched.schematic";
+	private static final int SWITCHED_SCENE_WIDTH = 4;
+	private static final int SWITCHED_SCENE_LENGTH = 3;
 
 	/**
 	 * The schematic the material list is shot over, and what it is made of. The amounts are the
@@ -2310,6 +2321,10 @@ public final class SmokeTest {
 				Schematica.CONFIG.infoHud = true;
 				Log.info("SMOKETEST: scene 21 - the info hud, counted in stacks");
 				return;
+			case 21:
+				Schematica.CONFIG.infoHud = false;
+				setUpSwitchedBlockScene(mc);
+				return;
 			default:
 				mc.setScreen(null);
 				if (WORLD_TEST && !MULTIPLAYER) {
@@ -3971,11 +3986,11 @@ public final class SmokeTest {
 	private static void runBlockSwapTests() {
 		Log.info("SMOKETEST: --- replacing blocks ---");
 
-		// 4 wide and 4 long: a row of cubes and stairs, a row of colours and awkward blocks, a row
-		// of the ones whose metadata is worth the most, and a row of the blocks the game switches
-		// between states on its own.
-		int[][][] blocks = new int[4][1][4];
-		int[][][] metadata = new int[4][1][4];
+		// 4 wide and 5 long: a row of cubes and stairs, a row of colours and awkward blocks, a row
+		// of the ones whose metadata is worth the most, a row of blocks the game switches between
+		// states on its own, and a row of the ones nobody puts anywhere.
+		int[][][] blocks = new int[4][1][5];
+		int[][][] metadata = new int[4][1][5];
 		blocks[0][0][0] = COBBLESTONE;
 		blocks[1][0][0] = COBBLESTONE;
 		blocks[2][0][0] = WOOD_STAIRS;
@@ -4000,18 +4015,21 @@ public final class SmokeTest {
 		metadata[1][0][3] = TORCH_ON_FLOOR;
 		blocks[2][0][3] = UNLIT_REDSTONE_TORCH;
 		metadata[2][0][3] = TORCH_ON_FLOOR;
+		blocks[3][0][3] = PISTON_HEAD;
+		blocks[0][0][4] = PISTON;
+		blocks[1][0][4] = MOVING_PISTON;
 
-		Schematic schematic = new Schematic(blocks, metadata, new ArrayList<>(), 4, 1, 4);
+		Schematic schematic = new Schematic(blocks, metadata, new ArrayList<>(), 4, 1, 5);
 		BlockPalette palette = BlockPalette.of(schematic);
 
-		check("the palette has a row for each kind of block", palette.getEntries().size(), 11);
+		check("the palette has a row for each kind of block", palette.getEntries().size(), 12);
 		check("counting each of them", paletteCount(palette, COBBLESTONE, 0), 2);
 		check("telling two colours of one block apart", paletteCount(palette, WOOL, 0), 1);
 		check("as a row of its own", paletteCount(palette, WOOL, RED_WOOL), 1);
 		check("while one block facing two ways is a single row", paletteCount(palette, WOOD_STAIRS, 0), 2);
 		check("and air is no row at all", paletteCount(palette, 0, 0), 0);
 
-		// --- the two halves of a pair, counted as the one block anybody puts down ---
+		// --- the halves of a pair, and the blocks nobody puts anywhere ---
 		check("a redstone torch the circuit had switched off is a redstone torch",
 				paletteCount(palette, REDSTONE_TORCH, 0), 2);
 		check("with no row of its own for the half the file caught it in",
@@ -4019,6 +4037,12 @@ public final class SmokeTest {
 		check("lit redstone ore is redstone ore the same way",
 				paletteCount(palette, REDSTONE_ORE, 0), 2);
 		check("and none of its own either", paletteCount(palette, LIT_REDSTONE_ORE, 0), 0);
+		check("a piston head is no row at all, nobody having put it there",
+				paletteCount(palette, PISTON_HEAD, 0), 0);
+		check("nor is a block a piston is halfway through pushing",
+				paletteCount(palette, MOVING_PISTON, 0), 0);
+		check("while the piston that owns them both still is",
+				paletteCount(palette, PISTON, 0), 1);
 
 		// --- what may stand in for what ---
 		BlockPalette.Entry cobblestone = paletteEntry(palette, COBBLESTONE, 0);
@@ -4115,6 +4139,7 @@ public final class SmokeTest {
 				BlockPalette.replace(schematic, ore, choice(ore, STONE, 0)), 2);
 		check("the one the file caught lit is the new block", schematic.getBlockId(3, 0, 2), STONE);
 		check("and so is the one it did not", schematic.getBlockId(0, 0, 3), STONE);
+		check("with the piston head left where it was", schematic.getBlockId(3, 0, 3), PISTON_HEAD);
 
 		Log.info("SMOKETEST: --- replacing blocks done ---");
 	}
@@ -4550,6 +4575,75 @@ public final class SmokeTest {
 
 		mc.setScreen(new MaterialListScreen(null));
 		Log.info("SMOKETEST: scene " + scene + " - the material list, counted in stacks");
+	}
+
+	/**
+	 * The replace screen over a schematic full of the blocks that used to be given a row they had
+	 * no business having.
+	 *
+	 * <p>What the shot is of is mostly what is not in it. Six kinds of block go in and four rows
+	 * come out: the cobblestone under it all, the piston, the two redstone torches under the one
+	 * name, and the plain torch. The head that piston is holding out and the block the other one is
+	 * halfway through pushing have no row, nobody having put either of them there; the redstone
+	 * torch the circuit had switched off has no row of its own. Replace is greyed on both kinds of
+	 * torch, a redstone torch not being another colour of torch but another thing entirely.
+	 */
+	private static void setUpSwitchedBlockScene(Minecraft mc) {
+		SchematicaState state = Schematica.STATE;
+		if (mc.world == null) {
+			Log.info("SMOKETEST: no world, skipping the switched blocks scene");
+			return;
+		}
+
+		int[][][] blocks = new int[SWITCHED_SCENE_WIDTH][2][SWITCHED_SCENE_LENGTH];
+		int[][][] metadata = new int[SWITCHED_SCENE_WIDTH][2][SWITCHED_SCENE_LENGTH];
+		for (int x = 0; x < SWITCHED_SCENE_WIDTH; x++) {
+			for (int z = 0; z < SWITCHED_SCENE_LENGTH; z++) {
+				blocks[x][0][z] = COBBLESTONE;
+			}
+		}
+
+		// A piston caught with its arm out, which is two blocks in the file and one thing to fetch.
+		blocks[0][1][0] = PISTON;
+		metadata[0][1][0] = EXTENDED;
+		blocks[0][1][1] = PISTON_HEAD;
+		// And a block one is halfway through pushing, which is not even one thing to fetch.
+		blocks[1][1][0] = MOVING_PISTON;
+		// The same redstone torch twice, once each way the circuit could have had it.
+		blocks[2][1][0] = REDSTONE_TORCH;
+		metadata[2][1][0] = TORCH_ON_FLOOR;
+		blocks[2][1][1] = UNLIT_REDSTONE_TORCH;
+		metadata[2][1][1] = TORCH_ON_FLOOR;
+		// And the block it is not a colour of.
+		blocks[3][1][0] = TORCH;
+		metadata[3][1][0] = TORCH_ON_FLOOR;
+
+		File file = new File(state.getSchematicDirectory(), SWITCHED_FILE);
+		try {
+			SchematicFormat.write(file, new Schematic(blocks, metadata, new ArrayList<>(),
+					SWITCHED_SCENE_WIDTH, 2, SWITCHED_SCENE_LENGTH));
+		} catch (IOException exception) {
+			fail("could not write the schematic for the switched blocks scene", exception);
+			return;
+		}
+
+		state.closeAll();
+		if (!state.openSchematic(file)) {
+			fail("openSchematic returned false setting up the switched blocks scene", null);
+			return;
+		}
+
+		state.getActive().offset.set(baseX, baseY, baseZ + STRUCTURE_SIZE + 2);
+		state.getActive().isRenderingSchematic = true;
+		state.getActive().needsUpdate = true;
+		parkCamera(mc);
+
+		BlockPalette palette = BlockPalette.of(state.getActive().schematic.getSchematic());
+		check("six kinds of block in the file are four rows on the screen",
+				palette.getEntries().size(), 4);
+
+		mc.setScreen(new BlockReplaceScreen(null, state.getActive()));
+		Log.info("SMOKETEST: scene " + scene + " - the replace screen, without the rows nobody placed");
 	}
 
 	/** Which block the n-th cell of that schematic holds, which is what makes each row its size. */

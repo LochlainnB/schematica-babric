@@ -223,8 +223,8 @@ not.
 Blocks that carry a block entity - chests, furnaces, dispensers, signs, note blocks, jukeboxes,
 spawners - are in no family at all, in either direction: the entity would be left behind at a
 position that is no longer its block, a chest's contents hanging inside a wall of stone. They are
-still listed, with the button greyed out. So are the blocks nobody places - water, fire, portals,
-piston heads - for the same reason they have no material list row.
+still listed, with the button greyed out, as is water, which you can carry in a bucket but cannot
+sensibly swap for a wall.
 
 Torches are the one pair of blocks that pass every test a family sets and are still kept apart. A
 torch and a redstone torch are the same shape, hang on the same walls and mean the same thing by
@@ -232,6 +232,12 @@ their metadata - and one of them is a light while the other is a signal. A wall 
 for redstone torches is not the same build in another material, it is a different circuit, so
 neither is ever offered the other. Nothing else in the game is torch-shaped, which leaves both rows
 with the button greyed out.
+
+Blocks nobody puts anywhere are not listed at all: the head of an extended piston, the block a
+piston is halfway through pushing, fire, a portal. They are what came of building the thing rather
+than what it was built out of, and there is nothing to be done with a row for one - the same reason
+they have no material list row. So a piston in a schematic is one row, the piston, whether it was
+saved holding its arm out or not.
 
 Two blocks that are one block in two states are counted as one. A redstone torch is a redstone
 torch whether the file caught it lit or not, a furnace is a furnace whether or not it was smelting,
@@ -738,8 +744,9 @@ the awkward blocks and a structure holding all of them is easier to write down t
 palette is asked to have a row per kind of block, to count each of them, to put two colours of one
 block in two rows and one block facing two ways in one, and to have no row at all for air. It is
 also asked for the rows it should not have: a redstone torch saved lit and one saved unlit counted
-as two redstone torches on one row with none of its own for the second, and lit redstone ore counted
-the same way. Then each family is asked what it will
+as two redstone torches on one row with none of its own for the second, lit redstone ore counted the
+same way, and no row whatever for a piston head or for a block a piston is halfway through pushing,
+with the piston that owns them both still a row of its own. Then each family is asked what it will
 and will not offer: a full cube offered another full cube, one the light comes through and one of a
 colour, and refused a stair, a chest and itself; stairs offered nothing but the other stairs and a
 door nothing but the other door; a chest offered nothing whatever; a torch refused the redstone
@@ -780,6 +787,11 @@ what a row reads with more than a stack left, with less, and for a pile that doe
 and checked to come back down to a plain count as the row is gathered. Scene 20 is a material list
 built to hold every way a row can be written at once, and scene 21 the corner of the screen counting
 the same schematic.
+
+Scene 22 is the replace screen over a schematic written to be mostly rows that should not be there:
+a piston with its arm out, another block halfway through being pushed, a redstone torch saved twice
+with the circuit each way, and a plain torch. Six kinds of block go in and four rows come out, with
+Replace greyed on both kinds of torch - the shot is of what is missing from it.
 
 Remembering what was open is checked from both ends. The name the mod gave the test world on its own
 is asserted to be the folder that world was started from, and on a server the address the connect

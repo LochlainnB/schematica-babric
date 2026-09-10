@@ -26,11 +26,13 @@ import net.minecraft.item.ItemStack;
  * build is made of and two things to point at, while a stair facing north and a stair facing south
  * are one thing put down twice. {@link BlockSwap} draws that line.
  *
- * <p>The half of a pair the game switches between on its own is not a kind of block of its own. A
- * redstone torch is counted as a redstone torch whether the file caught it lit or not, and a
- * furnace as a furnace whether or not it was smelting at the time. That is {@link BlockItems}'
- * answer, so it is the same answer the material list gets, and a schematic saved a second later
- * reads as the same schematic.
+ * <p>Two kinds of block are left out of the count for being nothing anybody put anywhere. One is
+ * the block the game made rather than the player - the head of an extended piston, fire, a portal -
+ * which has no row because there is nothing to be done with one. The other is the half of a pair
+ * the game switches between on its own: a redstone torch is counted as a redstone torch whether the
+ * file caught it lit or not, and a furnace as a furnace whether or not it was smelting at the time.
+ * Both of those are {@link BlockItems}' answers, so they are the same answers the material list
+ * gets, and a schematic saved a second later reads as the same schematic.
  *
  * <p>Counting is a walk of every block in the schematic, so the screen holding this counts once and
  * again after each replacement, rather than on every frame or resize.
@@ -146,6 +148,13 @@ public final class BlockPalette {
 		if (blockId <= 0) {
 			// Air is not something a schematic is made of, and not something to replace: a schematic
 			// is mostly air, and a row saying so would be the biggest one on every screen.
+			return;
+		}
+
+		if (!BlockItems.isPlaceable(blockId)) {
+			// Nor is the head of an extended piston, or fire, or a portal. They are what came of
+			// building the thing rather than what it was built out of - nobody put them there and
+			// nobody can take them away, so a row for one is a row with nothing to say.
 			return;
 		}
 
