@@ -64,7 +64,7 @@ public abstract class MinecraftMixin {
 	/** Joining or leaving a world invalidates the placement of anything already loaded. */
 	@Inject(method = "method_2115(Lnet/minecraft/world/World;Ljava/lang/String;Lnet/minecraft/entity/player/PlayerEntity;)V", at = @At("HEAD"))
 	private void schematica$onWorldChanged(World world, String message, PlayerEntity player, CallbackInfo info) {
-		Schematica.onWorldChanged();
+		Schematica.onWorldChanged(world);
 	}
 
 	/**

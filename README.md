@@ -84,6 +84,17 @@ another. A single player world is told apart by its save folder and a server by 
 dialled, and the dimension counts as well - a build sits at coordinates in the overworld that are
 somewhere else entirely in the Nether, so the two ends of a portal keep separate notes.
 
+What names a world is known before the world turns up - a save folder as one is started, an address
+as it is dialled - so it is a statement about where you were going rather than about what arrived. A
+world that turns up from a direction nothing announced would otherwise be taken for the last one
+that was, and a house pinned to a corner of your survival world would come back standing in the
+middle of somebody's spawn, at the coordinates it had at home. So the two are held up against each
+other: a world that belongs to a server can only be named by an address, and one that does not can
+only be named by a save folder. Where they disagree nothing is remembered there at all and the log
+says why, that being the only answer that cannot put a build into a world it was never in. The
+address itself is taken off the connection rather than off the screen that dialled it, so a pack
+that brings its own server list is still a server the mod can tell from every other one.
+
 Closing a schematic is what forgets that one, using the **Close** button you would use anyway. The
 note is kept up to date as you build rather than written only on the way out, so a game that is
 killed rather than closed still remembers. Notes live in `config/schematica-worlds.properties`,
@@ -105,6 +116,13 @@ feature that quietly stops remembering anything is worse than one that redraws a
 a world is written down from the moment it can be named, whoever else is in the way, and a schematic
 that has been waiting three seconds for an announcement that is not coming goes back anyway - the
 watcher above is what makes that safe. It says so in the log when it happens.
+
+The swap itself is not taken on trust either. A world can be changed without the mod hearing about
+it, the method that says so being another popular place, and the mod would then go on believing it
+was in the world it was last told about - writing one world's note under another world's name, and
+leaving a ghost standing where it has no business being. So the world in hand is compared against
+the one last seen on every tick, and a change nobody announced is taken up a tick late rather than
+never. That costs one rebuild and is also logged.
 
 ### Layers
 
@@ -584,8 +602,7 @@ work on the same way.
 | `InGameHudMixin`            | `InGameHud.render`              | draw the info HUD after it, under whatever screen is open       |
 | `WorldMixin`                | `World.method_243`              | invalidate the overlay when a block inside it changes           |
 | `TranslationStorageAccessor`| `TranslationStorage`            | merge this mod's language file into the vanilla table           |
-| `ClientNetworkHandlerMixin` | transaction, chunk and multi-block packets | hear whether the server took an inventory swap; invalidate the overlay for changes the world never reports block by block |
-| `ConnectScreenMixin`        | `ConnectScreen` constructor     | note which server is being dialled, so its world can be told apart |
+| `ClientNetworkHandlerMixin` | constructor, transaction, chunk and multi-block packets | note which server is being dialled, so its world can be told apart; hear whether the server took an inventory swap; invalidate the overlay for changes the world never reports block by block |
 
 The weather hook is the same place the ModLoader version attached itself: it runs after the terrain,
 entities and block outline are drawn, with the modelview matrix still in camera space.
@@ -794,8 +811,12 @@ with the circuit each way, and a plain torch. Six kinds of block go in and four 
 Replace greyed on both kinds of torch - the shot is of what is missing from it.
 
 Remembering what was open is checked from both ends. The name the mod gave the test world on its own
-is asserted to be the folder that world was started from, and on a server the address the connect
-screen was handed, since only a real join can answer for either. The rest is driven by hand, because
+is asserted to be the folder that world was started from, and on a server the address the connection
+was opened with, since only a real join can answer for either. The hook that reads that address is
+the one thing here a single player run never reaches, so the class it lives in is loaded on purpose
+and looked at for the handler: a mixin is applied when its target class loads, and an injection
+point that has stopped matching throws at that moment - which in a game is the moment Connect is
+pressed and here is a line in the log. The rest is driven by hand, because
 one run of the game cannot really log off and come back: a schematic is left open in one world and
 not found in another, the file is read back off disk the way a freshly started game reads it, a
 schematic moved while playing is checked to have been written down where it stopped, a hand-written
@@ -806,7 +827,14 @@ on, and closing one is checked to forget that one and no more. The shape of the 
 its own against a server address with four numbers in it, since each schematic is written under the
 number of its place in the world and a world named by an address is already full of dots and ends in
 a number: both the old one-schematic line and a pair of new ones are read back from that address by
-hand. One world in the set is left deliberately silent - named and then never
+hand, with the world in hand asked to read as a server's for as long as the pretence lasts, since
+the mod now holds one against the other. That check has an opposite: a schematic is left in a save
+folder's world, and then a world that belongs to a server arrives with nothing having said whose.
+The last word on where anyone was going is the save folder just left, and it is checked to be worth
+nothing - the world goes unnamed, nothing is put into it, it is still unnamed twenty ticks later,
+and the note is checked to be sitting untouched for the world it was really taken in. That is the
+one that used to end with a house standing in the middle of somebody's spawn. One world in the set
+is left deliberately silent - named and then never
 announced as ready, the way a world arrives when another mod has got to the swap first - and it is
 checked to be worked out anyway, to give up waiting rather than wait forever, and to be written down
 like any other; every other check says the announcement out loud, which is how a pack that swallowed

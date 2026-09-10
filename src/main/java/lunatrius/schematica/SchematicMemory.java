@@ -35,6 +35,14 @@ import net.minecraft.client.Minecraft;
  * build sits at in the overworld are somewhere else entirely in the Nether, so each end of a portal
  * remembers its own.
  *
+ * <p>What names a world is said before the world arrives - a save folder as one is started, an
+ * address as it is dialled - so it is a statement about where the player was going rather than
+ * about the world in hand. A world that turns up from a direction nothing announced would be taken
+ * for the last one that was, so the two are held up against each other: a world that is somebody
+ * else's server can only be named by an address, and a world that is not can only be named by a
+ * save folder. Where they disagree nothing is remembered here and the log says why, that being the
+ * only answer that cannot put a build back into a world it was never in.
+ *
  * <p>Nothing here is a setting. Closing a schematic before you log off is what forgets it, and that
  * is already how you close a schematic.
  */
@@ -51,6 +59,14 @@ public final class SchematicMemory {
 
 	/** The one field about the world rather than about a schematic in it. */
 	private static final String KEY_ACTIVE = "active";
+
+	/**
+	 * What a world id starts with, which is also what it promises about the world it names. A note
+	 * taken in a save folder is no note for a server, so the two are never spelt the same way and
+	 * the spelling is something {@link #attach} can hold the world up against.
+	 */
+	private static final String SINGLEPLAYER = "singleplayer/";
+	private static final String SERVER = "server/";
 
 	private static final String[] ENTRY_KEYS = {
 		KEY_SCHEMATIC, KEY_X, KEY_Y, KEY_Z, KEY_TURNS, KEY_MIRRORED, KEY_LAYER, KEY_OVERLAY,
@@ -78,8 +94,13 @@ public final class SchematicMemory {
 
 	private static File file;
 
-	/** Where the player is heading, set before the world arrives. Null until a world says. */
-	private static String base;
+	/**
+	 * Where the player is heading, set before the world arrives. Null until something says.
+	 *
+	 * <p>Volatile because a server is named from the thread that dials it while everything else
+	 * here runs on the client tick.
+	 */
+	private static volatile String base;
 	/** The world currently being remembered - {@link #base} plus its dimension - or null. */
 	private static String worldId;
 	/** What was last written for {@link #worldId}, so an unchanged state is not written again. */
@@ -109,8 +130,9 @@ public final class SchematicMemory {
 		file = target;
 		records.clear();
 		// Deliberately not the world we are heading for: this runs at the end of the game's own
-		// startup, and a game started with a server to join builds that screen before the end of it.
-		// Clearing the address here would throw away the one thing that names the world being joined.
+		// startup, and a game started with a server to join is already dialling it by then - from a
+		// thread of its own, so the address can arrive on either side of this line. Clearing it here
+		// would throw away the one thing that names the world being joined, some of the time.
 		worldId = null;
 		saved = null;
 		owed = null;
@@ -210,7 +232,7 @@ public final class SchematicMemory {
 
 	/** A single player world is told apart by the folder it is saved in. */
 	public static void onSingleplayerWorld(String saveName) {
-		base = "singleplayer/" + saveName;
+		base = SINGLEPLAYER + saveName;
 	}
 
 	/**
@@ -218,7 +240,7 @@ public final class SchematicMemory {
 	 * spellings of one server are still one server.
 	 */
 	public static void onServerConnect(String address, int port) {
-		base = "server/" + address.toLowerCase(Locale.ROOT) + ":" + port;
+		base = SERVER + address.toLowerCase(Locale.ROOT) + ":" + port;
 	}
 
 	/**
@@ -303,13 +325,29 @@ public final class SchematicMemory {
 	 * dimension a moment after handing over the world, and this can run in between.
 	 */
 	private static void attach(Minecraft mc) {
-		if (base == null) {
+		String where = base;
+		if (where == null) {
 			// Nothing said where we are - a world reached by some path the mod does not know about.
 			// Remembering nothing is better than remembering it against the wrong world.
 			return;
 		}
 
-		worldId = base + "/" + mc.world.dimension.id;
+		// What was said last is about the world that was being headed for, and a world can turn up
+		// that nothing said anything about: a screen the mod has never heard of, a connection made
+		// from somewhere else, a mod that reaches a swap first. The world in hand knows one thing
+		// about itself for certain, which is whether it is somebody else's, so the last thing said
+		// is held up against that before it is believed. A note left in a save folder naming a
+		// server's world is how a house comes back standing in the middle of somebody's spawn.
+		boolean remote = mc.isWorldRemote();
+		if (remote != where.startsWith(SERVER)) {
+			Log.warn("This world is " + (remote ? "on a server" : "single player")
+					+ " and the last word on where we were going was " + where
+					+ "; nothing will be remembered here rather than remembered against that");
+			base = null;
+			return;
+		}
+
+		worldId = where + "/" + mc.world.dimension.id;
 		ticks = 0;
 		waited = 0;
 		owed = records.get(worldId);

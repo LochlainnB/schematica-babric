@@ -2,8 +2,10 @@ package lunatrius.schematica.mixin;
 
 import lunatrius.schematica.HotbarRestock;
 import lunatrius.schematica.Schematica;
+import lunatrius.schematica.SchematicMemory;
 import net.minecraft.class_325;
 import net.minecraft.class_441;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.network.ClientNetworkHandler;
 import net.minecraft.network.packet.play.ChunkDataPacket;
 import org.spongepowered.asm.mixin.Mixin;
@@ -13,6 +15,21 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(ClientNetworkHandler.class)
 public abstract class ClientNetworkHandlerMixin {
+	/**
+	 * A connection to a server being opened, which is where the address is known and where a
+	 * multiplayer world is told apart by it.
+	 *
+	 * <p>Taken off the connection rather than off the screen that dialled it. Every world that
+	 * arrives from a server arrives through one of these - the handler is what builds it - so this
+	 * holds whatever screen is in front of it, and a pack is free to bring its own server list. At
+	 * the end of the constructor, so a connection that could not be made never names a world; the
+	 * world the player was in was let go of before this, on the way to the connecting screen.
+	 */
+	@Inject(method = "<init>(Lnet/minecraft/client/Minecraft;Ljava/lang/String;I)V", at = @At("RETURN"))
+	private void schematica$onConnect(Minecraft minecraft, String address, int port, CallbackInfo info) {
+		SchematicMemory.onServerConnect(address, port);
+	}
+
 	/**
 	 * The server's answer to a slot click. Easy place moves blocks onto the hotbar itself, and this
 	 * is the only word back on whether the server took them - the client keeps no note of its own,

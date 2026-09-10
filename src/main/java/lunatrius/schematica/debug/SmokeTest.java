@@ -53,6 +53,7 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.TitleScreen;
 import net.minecraft.client.gui.screen.option.KeybindsScreen;
 import net.minecraft.client.gui.widget.ButtonWidget;
+import net.minecraft.client.network.ClientNetworkHandler;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
@@ -1907,6 +1908,13 @@ public final class SmokeTest {
 		checkText("the world the mod has been watching is the one that was started",
 				SchematicMemory.getWorldId(), "singleplayer/" + WORLD_NAME + "/0");
 
+		// The other half of naming a world is a hook in a class a single player run never loads, so
+		// nothing here would notice it having stopped matching - the game would find out at the
+		// moment Connect is pressed, by going down. Reading the method off the class both loads it,
+		// which is when a mixin is applied and when a stale injector throws, and says it landed.
+		checkTrue("the hook that names a server is in the class that opens the connection",
+				hasMixinMethod(ClientNetworkHandler.class, "schematica$onConnect"));
+
 		File file = memoryFile();
 		SchematicMemory.load(file);
 
@@ -1973,6 +1981,7 @@ public final class SmokeTest {
 		runSilentWorldMemoryTests(mc, file);
 		runMultiMemoryTests(mc, file);
 		runServerIdMemoryTests(mc, file);
+		runWorldKindMemoryTests(mc, file);
 		runDimensionMemoryTests(mc, file);
 	}
 
@@ -1989,6 +1998,20 @@ public final class SmokeTest {
 	 * which has no number in it at all and has to come back as the first of a set.
 	 */
 	private static void runServerIdMemoryTests(Minecraft mc, File file) {
+		// The world in hand belongs to a save folder and what is being tested belongs to a server,
+		// and the mod now holds one against the other before it believes either. So the world is
+		// asked to read as a server's for as long as the pretence lasts, through the same flag the
+		// mod reads, and handed back afterwards however the checks inside turn out.
+		boolean singleplayer = mc.world.isRemote;
+		mc.world.isRemote = true;
+		try {
+			serverIdMemoryTests(mc, file);
+		} finally {
+			mc.world.isRemote = singleplayer;
+		}
+	}
+
+	private static void serverIdMemoryTests(Minecraft mc, File file) {
 		SchematicaState state = Schematica.STATE;
 		String host = "192.168.1.5";
 		String id = "server/" + host + ":25565/0";
@@ -2035,6 +2058,70 @@ public final class SmokeTest {
 		check("and the one opened beside it", state.getOpen().get(1).offset.x, 22);
 
 		state.closeAll();
+		SchematicMemory.onWorldLeaving();
+	}
+
+	/**
+	 * A note taken in a save folder is not put back into a server's world.
+	 *
+	 * <p>What names a world is said before the world turns up, so it is a statement about where the
+	 * player was heading rather than about what arrived. Leave a single player world, join a server
+	 * by some route the mod has no hook in, and the last word on where we were going is still the
+	 * save folder - which is how a house comes back standing in the middle of somebody's spawn, at
+	 * the coordinates it had at home. So the world in hand is held up against that word first, and
+	 * a word about the wrong kind of world is worth nothing.
+	 *
+	 * <p>Driven with the world reading as a server's, that being the flag the mod reads and the
+	 * only way to be on one from inside a single player run.
+	 */
+	private static void runWorldKindMemoryTests(Minecraft mc, File file) {
+		SchematicaState state = Schematica.STATE;
+
+		SchematicMemory.onWorldLeaving();
+		state.clearSchematic();
+		SchematicMemory.load(file);
+		comeBackTo("memory-e");
+		SchematicMemory.tick(mc);
+
+		File schematic = new File(state.getSchematicDirectory(), "smoketest.schematic");
+		if (!state.loadSchematic(schematic)) {
+			fail("loadSchematic returned false against a save folder's world", null);
+			return;
+		}
+		state.getActive().offset.set(77, 78, 79);
+
+		SchematicMemory.onWorldLeaving();
+		state.clearSchematic();
+
+		// A world arrives that is somebody else's, with nothing having said whose. The last word on
+		// where we were going is the save folder just left, and that is a word about somewhere else.
+		boolean singleplayer = mc.world.isRemote;
+		mc.world.isRemote = true;
+		try {
+			SchematicMemory.tick(mc);
+			checkTrue("a save folder's name is not given to a server's world",
+					SchematicMemory.getWorldId() == null);
+			checkTrue("so nothing is put back into it", state.getActive().schematic == null);
+
+			for (int i = 0; i < 25; i++) {
+				SchematicMemory.tick(mc);
+			}
+			checkTrue("and it is not taken up a moment later either",
+					SchematicMemory.getWorldId() == null);
+			checkTrue("with nothing standing in it", state.getActive().schematic == null);
+		} finally {
+			mc.world.isRemote = singleplayer;
+		}
+
+		// The note is where it was: a world that was never named never wrote over it either.
+		SchematicMemory.load(file);
+		comeBackTo("memory-e");
+		SchematicMemory.tick(mc);
+		checkTrue("while the world it was taken in still gets it back",
+				state.getActive().schematic != null);
+		check("at the place it was left", state.getActive().offset.x, 77);
+
+		state.clearSchematic();
 		SchematicMemory.onWorldLeaving();
 	}
 
@@ -4509,6 +4596,25 @@ public final class SmokeTest {
 		Schematica.STATE.selectedSchematic = 1;
 		clickButton(screen, buttonAt(screen, 0));
 		Log.info("SMOKETEST: scene " + scene + " - the load screen with a delete armed");
+	}
+
+	/**
+	 * Whether a mixin's handler really landed in the class it targets, which is as much as can be
+	 * asked of a hook nothing in a single player run ever reaches. Loading the class is where a
+	 * mixin is applied and where an injection point that no longer matches throws, so the answer
+	 * being yes means both that the class took the mixin and that the point was found.
+	 *
+	 * <p>Matched on the end of the name rather than the whole of it: a handler arrives in its
+	 * target decorated - {@code handler$abc123$schematica$onConnect} - and the decoration is
+	 * Mixin's to choose.
+	 */
+	private static boolean hasMixinMethod(Class<?> target, String name) {
+		for (java.lang.reflect.Method method : target.getDeclaredMethods()) {
+			if (method.getName().endsWith(name)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** The load screen's snapshot of the folder: the placeholder first, then the file names. */

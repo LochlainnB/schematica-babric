@@ -1,6 +1,7 @@
 package lunatrius.schematica;
 
 import java.io.File;
+import java.lang.ref.WeakReference;
 
 import lunatrius.schematica.gui.InfoHud;
 import lunatrius.schematica.gui.MaterialListScreen;
@@ -13,6 +14,7 @@ import lunatrius.schematica.util.Log;
 import lunatrius.schematica.util.Translations;
 import net.fabricmc.api.ClientModInitializer;
 import net.minecraft.client.Minecraft;
+import net.minecraft.world.World;
 
 /**
  * Entry point. Everything the mod does is client side and lives behind the keybinds in
@@ -26,6 +28,16 @@ public class Schematica implements ClientModInitializer {
 
 	public static final SchematicaState STATE = new SchematicaState();
 	public static final SchematicaConfig CONFIG = new SchematicaConfig();
+
+	/**
+	 * The world the mod last saw, so a swap nobody announced can still be noticed.
+	 *
+	 * <p>Weak, because a world let go of is a large thing to be the last one holding: the reference
+	 * is only ever compared against the world the game is holding, and a world the game is holding
+	 * cannot be collected out from under it. One that has been collected is by that fact not the
+	 * world any more, which is the answer the comparison wanted anyway.
+	 */
+	private static WeakReference<World> lastWorld = new WeakReference<>(null);
 
 	private static Minecraft minecraft;
 	private static SchematicRenderer renderer;
@@ -62,8 +74,12 @@ public class Schematica implements ClientModInitializer {
 	/**
 	 * Joining a world, leaving one, or stepping between dimensions. What was open here is written
 	 * down before the state holding it is cleared out.
+	 *
+	 * @param incoming the world being handed over, kept so that {@link #onClientTick} can tell a
+	 *                 swap that came through here from one that never did
 	 */
-	public static void onWorldChanged() {
+	public static void onWorldChanged(World incoming) {
+		lastWorld = new WeakReference<>(incoming);
 		SchematicMemory.onWorldLeaving();
 		STATE.onWorldChanged();
 	}
@@ -89,6 +105,18 @@ public class Schematica implements ClientModInitializer {
 		// counting behind an open screen, which is what shows the material list screen's own HUD
 		// buttons taking effect while they are being clicked.
 		InfoHud.tick(mc);
+
+		// A world can be swapped without the hook that says so ever being reached - this is a game
+		// played under a stack of mods, and one of them getting to the same method first is a thing
+		// that happens. Left unnoticed, the mod would go on believing it was in the world it was
+		// last told about: writing one world's note under another world's name, and standing a
+		// house from a save folder in the middle of a server. So the world in hand is compared with
+		// the one last seen, and a change nobody announced is taken up here instead, a tick late.
+		if (mc.world != null && lastWorld.get() != mc.world) {
+			Log.warn("The world changed without anything saying so, which usually means another mod"
+					+ " reaches the same swap; taking it up a tick late");
+			onWorldChanged(mc.world);
+		}
 
 		// Ahead of the smoke test as well as the screen check: a world is joined with a screen still
 		// up, and putting the last schematic back is the first thing that should happen in it.
