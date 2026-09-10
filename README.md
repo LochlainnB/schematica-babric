@@ -34,10 +34,10 @@ controls screen has room for fourteen keys and puts its Done button on top of th
 last of them are rebound from the mod's own **Controls...** screen instead. Both write the same
 bindings to the same file.
 
-The render settings - transparency, the comparison boxes and how far they are inset - live on their
-own screen, reachable from the settings key above, the **Settings** button on the move screen, and
-Mod Menu's **Configure** button. All three open the same screen, so the key works with or without
-Mod Menu installed.
+The settings - transparency, the comparison boxes, how far they are inset, and whether pasting
+clears the cells its schematic leaves empty - live on their own screen, reachable from the settings
+key above, the **Settings** button on the move screen, and Mod Menu's **Configure** button. All
+three open the same screen, so the key works with or without Mod Menu installed.
 
 Hiding and showing keeps the cached geometry, so the toggle key is instant whatever the schematic
 costs to draw.
@@ -393,11 +393,22 @@ gathered. Beta 1.7.3 has no creative mode of its own, so the answer comes from
 Where any of that is not true the button is greyed out, and hovering it says which of the reasons it
 is rather than leaving you to work it out.
 
-What gets written is what the ghost draws: the blocks the schematic asks for, and nothing else. A
-cell the schematic leaves empty is left alone rather than cleared, so a build dropped onto a
-hillside does not carve the hill out from under itself. Empty means "no part of this build"
-everywhere else in the mod - the overlay draws nothing there, the material list counts nothing for
-it, easy place will not put anything in it - and pasting reads it the same way.
+What gets written is what the ghost draws: the blocks the schematic asks for. What becomes of the
+cells it asks for nothing in is the **Paste Air** setting, and it is a real question rather than an
+oversight, because an empty cell can be read two ways. It can mean "no part of this build", which is
+how the rest of the mod reads it - the overlay draws nothing there, the material list counts nothing
+for it, easy place will not put anything in it. Or it can mean "and there is air here", which is how
+the schematic was in fact standing in the world it was cut out of.
+
+With the setting on, which is how the mod ships, the box the schematic covers is emptied before
+anything is written into it, so what is left standing inside it afterwards is the build and nothing
+else. A schematic dropped underground comes out with its rooms rather than with the hill they were
+cut into still filling them. With it off, whatever is already there is left where it is, which is
+what a build saved with room around it wants: dropped onto a hillside, the room around it is not a
+box carved out of the hill.
+
+Either way the clearing stops at the schematic's own edges. A paste covers the box the ghost was
+drawing and not one cell more.
 
 It goes down in two passes: everything that can be hung on, and then everything that hangs. A block
 is told it has landed the moment it is written, and some of them look around when they hear it - a
@@ -577,7 +588,7 @@ compat/      ModMenuIntegration  optional, loaded only when Mod Menu asks for it
 mixin/       eight small hooks (see below)
 SchematicaState    everything about the current session: the open schematics, and which is picked
 OpenSchematic      one of them: what it is, where it stands, how it is turned and what is drawn
-SchematicaConfig   the render settings, and the keybinds it hands to vanilla
+SchematicaConfig   the settings, and the keybinds it hands to vanilla
 EasyPlace          what a right click is allowed to do while easy place is on
 HotbarRestock      brings a block onto the hotbar, and waits for the server to agree
 Sightline          walks the blocks along the line of sight, nearest first
@@ -713,10 +724,12 @@ underneath is then driven directly, since a plain dev run has no creative mode i
 gate with. The schematic is parked over an emptied box of its own with one block left standing in a
 cell it wants nothing in, and afterwards every block it asks for is checked to be standing and turned
 the way it was saved, the sign to have arrived with its text, the schematic to have kept a sign of
-its own rather than handed it over, and that one witness block to still be there - which is the whole
-difference between pasting a build and pasting a box of air, and is not something a count of blocks
-written could show. The button itself is rendered for real from a position over it, which is what
-both greys it out and draws the tooltip.
+its own rather than handed it over, and that one witness block to still be standing, the paste
+having been made with **Paste Air** off. The paste is then made again with the setting on, over an
+emptied box with the witness put back: this time the witness has to be gone, while a block just
+outside the schematic's edges is still there. The count of blocks written is the same either way, so
+nothing else in the run would notice which of the two had happened. The button itself is rendered
+for real from a position over it, which is what both greys it out and draws the tooltip.
 
 Drop BHCreative's jar into `run/mods` and add `-PstationApi`, which it needs, and the rest of it runs
 too: the player is stepped into creative mode through the mod's own setter, the gate is asked again,
@@ -888,7 +901,10 @@ as a block update putting the air back, so surviving that wait is the server's a
 The layer step - which the layer keys and the move screen's buttons share - is checked at both ends
 of the range, including that a step past the end rebuilds nothing. The mod's controls screen is
 driven the same way as a player would: click a row, press a key, and check that the binding and
-`options.txt` both took it, and that Escape gives the rebind up rather than binding Escape.
+`options.txt` both took it, and that Escape gives the rebind up rather than binding Escape. The
+settings screen gets the same treatment for its **Paste Air** toggle, which is the only way into a
+setting nothing else on screen reports: it is clicked off and on again, and both the value
+underneath and the label on top are read back each time.
 
 The coordinate rows are driven the way a player drives them, through the screen's own key and mouse
 handlers: a value typed and applied with Enter, another with Tab, one abandoned with Escape, one

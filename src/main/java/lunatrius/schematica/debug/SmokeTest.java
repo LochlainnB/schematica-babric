@@ -290,6 +290,7 @@ public final class SmokeTest {
 					useScratchMemory();
 					runDataTests();
 					runKeybindTests(mc);
+					runSettingsScreenTests(mc);
 					runModMenuTests();
 					runPasteGateTests(mc);
 					phase = WORLD_TEST ? Phase.START_WORLD : Phase.SHOOT;
@@ -962,6 +963,63 @@ public final class SmokeTest {
 		runKeysScreenTests(mc, config, original);
 
 		Log.info("SMOKETEST: --- keybinds done ---");
+	}
+
+	/**
+	 * The Paste Air toggle, driven through the button a player would reach it by.
+	 *
+	 * <p>It is the only way into the setting, and a button wired to nothing would look exactly like
+	 * a button wired to the wrong thing: the label would still say ON and the paste would still
+	 * leave the ground where it was. So the click is made and both the setting underneath and the
+	 * label on top are read back.
+	 *
+	 * <p>Run from the title screen, before there is a world - this screen is the one Mod Menu opens
+	 * from there, so it has to stand up with nothing loaded. Puts the setting back the way it found
+	 * it, and writes it out, since clicking the button wrote the other one.
+	 */
+	private static void runSettingsScreenTests(Minecraft mc) {
+		Log.info("SMOKETEST: --- settings screen ---");
+		SchematicaConfig config = Schematica.CONFIG;
+		boolean saved = config.pasteAir;
+		Screen before = mc.currentScreen;
+
+		try {
+			// The shipped default, asked of a config nobody has written to rather than of the one on
+			// disk: this run's own config file is whatever the last run left behind.
+			checkTrue("a paste clears what the schematic leaves empty unless it is told not to",
+					new SchematicaConfig().pasteAir);
+
+			// And the screen is opened with the setting in a known place for the same reason, so the
+			// button can be found by the label it ought to be wearing.
+			config.pasteAir = true;
+			SchematicaSettingsScreen screen = new SchematicaSettingsScreen(null);
+			mc.setScreen(screen);
+
+			ButtonWidget toggle = buttonNamed(screen, pasteAirLabel(true));
+			if (toggle == null) {
+				fail("the settings screen has no Paste Air button reading ON", null);
+				return;
+			}
+
+			clickButton(screen, toggle);
+			checkTrue("clicking it turns the setting off", !config.pasteAir);
+			checkText("and the button says so", toggle.text, pasteAirLabel(false));
+
+			clickButton(screen, toggle);
+			checkTrue("clicking it again turns it back on", config.pasteAir);
+			checkText("and the button says that", toggle.text, pasteAirLabel(true));
+		} finally {
+			config.pasteAir = saved;
+			config.save();
+			mc.setScreen(before);
+		}
+		Log.info("SMOKETEST: --- settings screen done ---");
+	}
+
+	/** The label the settings screen puts on its Paste Air button, worked out the same way it does. */
+	private static String pasteAirLabel(boolean on) {
+		return Translations.get("schematic.settings.pasteair") + ": "
+				+ Translations.get(on ? "options.on" : "options.off");
 	}
 
 	/**
@@ -3332,10 +3390,12 @@ public final class SmokeTest {
 	 * open is {@link #runCreativePasteTests}, which needs the second.
 	 *
 	 * <p>The schematic is parked over an emptied box of its own with one block left standing in a
-	 * cell it wants nothing in. That block surviving is the whole difference between pasting a build
-	 * and pasting a box of air, and it is not something a count of blocks written could show.
+	 * cell it wants nothing in. What becomes of that block is the whole of the Paste Air setting,
+	 * and it is not something the count of blocks written could show either way - that count is the
+	 * same whichever way the setting is turned. Both answers are checked, off here and on in
+	 * {@link #runPasteAirTests}.
 	 *
-	 * <p>Puts the world and the ghost back where it found them.
+	 * <p>Puts the world, the ghost and the setting back the way it found them.
 	 */
 	private static void runPasteTests(Minecraft mc) {
 		SchematicaState state = Schematica.STATE;
@@ -3366,6 +3426,7 @@ public final class SmokeTest {
 		int savedY = state.getActive().offset.y;
 		int savedZ = state.getActive().offset.z;
 		boolean savedUpdate = state.getActive().needsUpdate;
+		boolean savedPasteAir = Schematica.CONFIG.pasteAir;
 
 		// Above the ghost and clear of the structure it was cut from, so nothing in this box belongs
 		// to anything else.
@@ -3396,6 +3457,11 @@ public final class SmokeTest {
 			check("the schematic wants nothing in the witness cell", schematic.getBlockId(1, 1, 1), 0);
 			world.method_201(pasteX + 1, pasteY + 1, pasteZ + 1, COBBLESTONE, 0);
 			state.getActive().offset.set(pasteX, pasteY, pasteZ);
+
+			// The setting the mod does not ship with, checked first because it is the one that leaves
+			// the world alone: everything else about a paste is the same either way, so it can all be
+			// asked once here and only the witness asked again with the setting turned back on.
+			Schematica.CONFIG.pasteAir = false;
 
 			// The button's own call, which has to refuse: without creative mode there is no paste.
 			check("pasting is refused with no creative mode to be in",
@@ -3442,7 +3508,7 @@ public final class SmokeTest {
 					world.getBlockId(pasteX + 2, pasteY + 1, pasteZ + 2), WOOD_STAIRS);
 			check("and the torch is still facing the way it was saved",
 					world.method_1778(pasteX + 3, pasteY + 1, pasteZ + 2), worldTorchMetadata);
-			check("a cell the schematic leaves empty is left alone",
+			check("with the setting off, a cell the schematic leaves empty is left alone",
 					world.getBlockId(pasteX + 1, pasteY + 1, pasteZ + 1), COBBLESTONE);
 
 			BlockEntity pasted = world.method_1777(pasteX + 1, pasteY + 1, pasteZ + 4);
@@ -3461,6 +3527,8 @@ public final class SmokeTest {
 				checkText("with its text still on it", ((SignBlockEntity) ghost).texts[0], "SMOKE");
 			}
 
+			runPasteAirTests(mc, pasteX, pasteY, pasteZ, wanted);
+
 			if (creativeMod) {
 				runCreativePasteTests(mc, pasteX, pasteY, pasteZ, wanted);
 			}
@@ -3475,10 +3543,71 @@ public final class SmokeTest {
 			}
 			state.getActive().offset.set(savedX, savedY, savedZ);
 			state.getActive().needsUpdate = savedUpdate;
+			Schematica.CONFIG.pasteAir = savedPasteAir;
 		}
 
 		runPasteButtonTests(mc, false);
 		Log.info("SMOKETEST: --- paste done ---");
+	}
+
+	/**
+	 * The same paste again with Paste Air on, which is the setting the mod ships with.
+	 *
+	 * <p>The box is emptied and the witness put back first, so what is asked is asked of the setting
+	 * rather than of whatever the paste before it left standing.
+	 *
+	 * <p>Three things have to be true together. The build arrives as it did with the setting off,
+	 * and it arrives as the same number of blocks - clearing a cell is not placing anything in it,
+	 * and a count that said otherwise would be a count of the box rather than of the build. The
+	 * witness does not survive this time, which is the setting doing the one thing it is for. And a
+	 * block a cell outside the schematic's own box does survive, because a paste clears the space
+	 * its schematic covers and not one cell more - a build dropped into a hillside is meant to take
+	 * its own rooms out of the hill, not the hill.
+	 *
+	 * <p>Puts the setting back on the way out. The world inside the box is the caller's to restore,
+	 * which it does either way; the cell outside it is this one's, since the caller never saved it.
+	 */
+	private static void runPasteAirTests(Minecraft mc, int pasteX, int pasteY, int pasteZ, int wanted) {
+		SchematicaState state = Schematica.STATE;
+		World world = mc.world;
+		Schematic schematic = state.getActive().schematic.getSchematic();
+		boolean savedPasteAir = Schematica.CONFIG.pasteAir;
+
+		Log.info("SMOKETEST: --- paste, clearing what the schematic leaves empty ---");
+
+		// One cell to the west of the box, which nothing in the schematic covers.
+		int outsideX = pasteX - 1;
+		int outsideY = pasteY + 1;
+		int outsideZ = pasteZ + 1;
+		int outsideBlock = world.getBlockId(outsideX, outsideY, outsideZ);
+		int outsideMetadata = world.method_1778(outsideX, outsideY, outsideZ);
+
+		try {
+			for (int x = 0; x < schematic.getWidth(); x++) {
+				for (int y = 0; y < schematic.getHeight(); y++) {
+					for (int z = 0; z < schematic.getLength(); z++) {
+						world.method_201(pasteX + x, pasteY + y, pasteZ + z, 0, 0);
+					}
+				}
+			}
+			world.method_201(pasteX + 1, pasteY + 1, pasteZ + 1, COBBLESTONE, 0);
+			world.method_201(outsideX, outsideY, outsideZ, COBBLESTONE, 0);
+
+			Schematica.CONFIG.pasteAir = true;
+			int placed = SchematicPaste.write(world, state);
+
+			check("clearing the empty cells writes the same blocks as leaving them", placed, wanted);
+			check("the floor is down", world.getBlockId(pasteX, pasteY, pasteZ), GOLD);
+			check("the cell the schematic wants nothing in is empty now",
+					world.getBlockId(pasteX + 1, pasteY + 1, pasteZ + 1), 0);
+			check("and a cell outside the schematic is left standing",
+					world.getBlockId(outsideX, outsideY, outsideZ), COBBLESTONE);
+		} finally {
+			Schematica.CONFIG.pasteAir = savedPasteAir;
+			world.method_201(outsideX, outsideY, outsideZ, outsideBlock, outsideMetadata);
+		}
+
+		Log.info("SMOKETEST: --- paste, clearing done ---");
 	}
 
 	/**
@@ -3491,7 +3620,8 @@ public final class SmokeTest {
 	 * name held in two strings, and nothing about a build would ever notice either going stale.
 	 *
 	 * <p>Runs with the ghost already parked over the box its caller emptied, and puts creative mode
-	 * back off on the way out.
+	 * back off on the way out. The paste is made with the settings the mod ships with, this being
+	 * the only one in the run that goes through the button rather than around it.
 	 */
 	private static void runCreativePasteTests(Minecraft mc, int pasteX, int pasteY, int pasteZ, int wanted) {
 		SchematicaState state = Schematica.STATE;
@@ -3520,11 +3650,16 @@ public final class SmokeTest {
 			}
 			world.method_201(pasteX + 1, pasteY + 1, pasteZ + 1, COBBLESTONE, 0);
 
+			// Set here rather than left as the caller had it: this is the one paste in the run that
+			// goes through the button from end to end, so it is the one that should be made with the
+			// settings the mod ships with. The caller puts the setting back.
+			Schematica.CONFIG.pasteAir = true;
+
 			// The button's own call again, this time all the way through.
 			check("the paste the button makes writes the schematic", SchematicPaste.paste(mc), wanted);
 			check("the floor is down", world.getBlockId(pasteX, pasteY, pasteZ), GOLD);
-			check("and the cell it wants nothing in is untouched even now",
-					world.getBlockId(pasteX + 1, pasteY + 1, pasteZ + 1), COBBLESTONE);
+			check("and the cell it wants nothing in was cleared on the way past",
+					world.getBlockId(pasteX + 1, pasteY + 1, pasteZ + 1), 0);
 
 			BlockEntity sign = world.method_1777(pasteX + 1, pasteY + 1, pasteZ + 4);
 			if (sign instanceof SignBlockEntity) {

@@ -67,6 +67,21 @@ public class SchematicaConfig {
 	/** Which end of the material list the info HUD puts at the top. */
 	public MaterialList.Sort infoHudSort = MaterialList.Sort.DESCENDING;
 
+	/**
+	 * Whether pasting clears the cells its schematic leaves empty, rather than leaving whatever is
+	 * already standing in them.
+	 *
+	 * <p>On, because a paste is meant to leave the build the overlay was drawing and nothing else.
+	 * A schematic dropped into a hillside is otherwise pasted through the hill rather than into it:
+	 * the walls arrive and the rooms behind them stay full of stone, which is not a house.
+	 *
+	 * <p>Off is the other reading of an empty cell, and the one the rest of the mod takes - no part
+	 * of this build, rather than air that has to be there. That is what a schematic saved with room
+	 * around it wants, since the room around it is then not a box carved out of the ground it lands
+	 * on.
+	 */
+	public boolean pasteAir = true;
+
 	/** Largest value the settings screen offers for {@link #blockDelta}. */
 	public static final float MAX_BLOCK_DELTA = 0.05F;
 
@@ -99,6 +114,7 @@ public class SchematicaConfig {
 		this.blockDelta = clamp(readFloat(properties, "blockDelta", this.blockDelta), 0.0F, 0.5F);
 		this.infoHud = readBoolean(properties, "infoHud", this.infoHud);
 		this.infoHudSort = readSort(properties, "infoHudSort", this.infoHudSort);
+		this.pasteAir = readBoolean(properties, "pasteAir", this.pasteAir);
 
 		this.migrateKeybinds(properties);
 	}
@@ -147,6 +163,7 @@ public class SchematicaConfig {
 		properties.setProperty("blockDelta", Float.toString(this.blockDelta));
 		properties.setProperty("infoHud", Boolean.toString(this.infoHud));
 		properties.setProperty("infoHudSort", this.infoHudSort.name().toLowerCase(Locale.ROOT));
+		properties.setProperty("pasteAir", Boolean.toString(this.pasteAir));
 
 		try (OutputStream stream = new FileOutputStream(this.file)) {
 			properties.store(stream, "Schematica - keybinds live in Options > Controls");

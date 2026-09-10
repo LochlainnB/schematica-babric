@@ -10,7 +10,12 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 
 /**
- * The render settings, laid out like the vanilla options screen.
+ * The mod's settings, laid out like the vanilla options screen.
+ *
+ * <p>Mostly the render settings, and one thing that is not: whether pasting clears the cells its
+ * schematic leaves empty. That belongs here rather than next to the Paste button because it is how
+ * you want pasting to work rather than something to be decided again on every paste - and because
+ * the move screen's left column is full.
  *
  * <p>This is what Mod Menu opens for the "Configure" button, so it has to work from the title
  * screen as well as in game: nothing here touches the world.
@@ -26,6 +31,7 @@ public class SchematicaSettingsScreen extends Screen implements SliderWidget.Lis
 	private SliderWidget sldAlpha;
 	private SliderWidget sldBlockDelta;
 	private ButtonWidget btnHighlight;
+	private ButtonWidget btnPasteAir;
 	private ButtonWidget btnControls;
 	private ButtonWidget btnOpenDir;
 	private ButtonWidget btnDone;
@@ -52,8 +58,14 @@ public class SchematicaSettingsScreen extends Screen implements SliderWidget.Lis
 		this.buttons.add(this.sldBlockDelta);
 
 		this.btnControls = this.addButton(3, right, top + 24, 150, 20, Translations.get("schematic.settings.controls"));
-		this.btnOpenDir = this.addButton(4, this.width / 2 - 100, top + 60, 200, 20, Translations.get("schematic.openFolder"));
-		this.btnDone = this.addButton(5, this.width / 2 - 100, top + 168, 200, 20, Translations.get("schematic.done"));
+
+		// A third row on the same two-column grid, which is what the folder button moved off the
+		// middle of the screen to make: a row of one, centred, with a row of two above it read as a
+		// heading for them rather than as another setting.
+		this.btnPasteAir = this.addButton(4, left, top + 48, 150, 20, this.pasteAirLabel());
+		this.btnOpenDir = this.addButton(5, right, top + 48, 150, 20, Translations.get("schematic.openFolder"));
+
+		this.btnDone = this.addButton(6, this.width / 2 - 100, top + 168, 200, 20, Translations.get("schematic.done"));
 	}
 
 	private ButtonWidget addButton(int id, int x, int y, int width, int height, String text) {
@@ -72,6 +84,14 @@ public class SchematicaSettingsScreen extends Screen implements SliderWidget.Lis
 			this.config.highlight = !this.config.highlight;
 			this.btnHighlight.text = this.highlightLabel();
 			this.applied();
+		} else if (button == this.btnPasteAir) {
+			this.config.pasteAir = !this.config.pasteAir;
+			this.btnPasteAir.text = this.pasteAirLabel();
+			// Straight to the file rather than through applied(). This is the one setting on the
+			// screen that changes nothing about how a schematic is drawn, so there is no cached
+			// geometry for it to throw away - and throwing it away anyway would rebuild every open
+			// schematic to answer a question about pasting.
+			this.config.save();
 		} else if (button == this.btnControls) {
 			this.minecraft.setScreen(new SchematicaKeysScreen(this));
 		} else if (button == this.btnOpenDir) {
@@ -109,6 +129,11 @@ public class SchematicaSettingsScreen extends Screen implements SliderWidget.Lis
 	private String blockDeltaLabel() {
 		return Translations.get("schematic.settings.blockdelta") + ": "
 				+ String.format(Locale.ROOT, "%.3f", this.config.blockDelta);
+	}
+
+	private String pasteAirLabel() {
+		return Translations.get("schematic.settings.pasteair") + ": "
+				+ Translations.get(this.config.pasteAir ? "options.on" : "options.off");
 	}
 
 	private String highlightLabel() {

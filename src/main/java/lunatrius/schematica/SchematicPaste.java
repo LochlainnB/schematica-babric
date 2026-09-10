@@ -25,11 +25,14 @@ import net.minecraft.world.World;
  * <p>Creative mode is not something Beta 1.7.3 has an answer for on its own - see
  * {@link CreativeMode} for who is asked instead, and why through a keyhole rather than a door.
  *
- * <p>What gets written is what the overlay draws: the blocks the schematic asks for, and nothing
- * else. A cell the schematic leaves empty is left alone rather than cleared, because empty means
- * "no part of this build" everywhere else in the mod - the overlay draws nothing there, the material
- * list counts nothing for it, easy place will not put anything in it - and a paste that read it as
- * "and there must be air here" would carve the ground out from under a build dropped on a hillside.
+ * <p>What gets written is the blocks the schematic asks for. What happens to the cells it asks for
+ * nothing in is the {@code pasteAir} setting, and it is a real question rather than an oversight:
+ * an empty cell can be read as "no part of this build", which is how the rest of the mod reads it,
+ * or as "and there must be air here", which is how a schematic saved out of a world was in fact
+ * standing. On - the default - the box is cleared first, so what is left standing inside it is the
+ * build and nothing else; a schematic dropped underground gets its rooms rather than the hill they
+ * were cut into. Off, whatever is already there is left where it is, so a build saved with room
+ * around it can be dropped onto a hillside without that room being carved out of the hill.
  */
 public final class SchematicPaste {
 	/** What {@link #paste} returns when it would not. */
@@ -154,6 +157,13 @@ public final class SchematicPaste {
 
 		long started = System.currentTimeMillis();
 
+		// Emptied first, where the setting says to empty it: the build then goes into a box that is
+		// already clear, rather than being written and then having the ground taken out from between
+		// its blocks afterwards. Nothing that lands later has to wonder what it is standing next to.
+		int cleared = Schematica.CONFIG.pasteAir
+				? clearPass(world, schematic, offsetX, offsetY, offsetZ)
+				: 0;
+
 		// Walls first, then everything that hangs on one. A block that has landed can be asked whether
 		// it is still standing on anything, and a torch asked that before the wall it hangs on has
 		// been written takes itself down, drops on the floor as an item and leaves a hole in the
@@ -192,7 +202,8 @@ public final class SchematicPaste {
 		open.needsUpdate = true;
 
 		Log.info("Pasted " + open.getLoadedName() + " at " + offsetX + ", " + offsetY + ", " + offsetZ
-				+ " - " + placed + " block(s), " + entities + " block entit" + (entities == 1 ? "y" : "ies")
+				+ " - " + placed + " block(s), " + cleared + " cell(s) cleared, "
+				+ entities + " block entit" + (entities == 1 ? "y" : "ies")
 				+ ", " + repairs.metadata + " turned back the way they were saved, "
 				+ (System.currentTimeMillis() - started) + " ms");
 		if (repairs.lost > 0) {
@@ -201,6 +212,47 @@ public final class SchematicPaste {
 					+ " has nothing to attach it to unless the world already holds it.");
 		}
 		return placed;
+	}
+
+	/**
+	 * Empties every cell the schematic asks for nothing in, which is what leaves a pasted build
+	 * standing in its own space rather than mixed through whatever it was dropped into.
+	 *
+	 * <p>The raw setter, for the same reason the writing uses it: a cell going empty is not news a
+	 * house being built around it should be hearing. The block that was there is still told it has
+	 * been taken out, which is the chunk's own doing rather than something asked of it here, and is
+	 * what tips a chest's contents onto the floor instead of leaving a block entity sitting in a
+	 * cell that is now air.
+	 *
+	 * <p>A cell holding a block this version has no answer for is left alone rather than cleared.
+	 * The schematic asking for one is a schematic from a later game, and it is not asking for
+	 * nothing there - which is the only thing that clears a cell.
+	 *
+	 * <p>Counts the cells that actually changed rather than the cells looked at. The setter refuses
+	 * a write that would change nothing, and a schematic is mostly empty over ground that above
+	 * anything built on is mostly empty too, so the two numbers are nowhere near each other.
+	 */
+	private static int clearPass(World world, Schematic schematic, int offsetX, int offsetY, int offsetZ) {
+		int cleared = 0;
+
+		for (int y = 0; y < schematic.getHeight(); y++) {
+			int worldY = y + offsetY;
+			if (worldY < 0 || worldY > MAX_Y) {
+				continue;
+			}
+			for (int x = 0; x < schematic.getWidth(); x++) {
+				for (int z = 0; z < schematic.getLength(); z++) {
+					if (schematic.getBlockId(x, y, z) != 0) {
+						continue;
+					}
+					if (world.method_154(x + offsetX, worldY, z + offsetZ, 0, 0)) {
+						cleared++;
+					}
+				}
+			}
+		}
+
+		return cleared;
 	}
 
 	/**

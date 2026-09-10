@@ -34,6 +34,7 @@ schematic.settings.title=Schematica Settings
 schematic.settings.alpha=Transparency
 schematic.settings.highlight=Highlight
 schematic.settings.blockdelta=Box Inset
+schematic.settings.pasteair=Paste Air
 schematic.settings.controls=Controls...
 schematic.settings.keybinds=Keys - use Controls... to change them
 schematic.keys.title=Schematica Controls
