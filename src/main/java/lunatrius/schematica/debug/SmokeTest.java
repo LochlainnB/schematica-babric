@@ -113,9 +113,10 @@ public final class SmokeTest {
 	private static final int WOOL = 35;
 	private static final int RED_WOOL = 14;
 	private static final int PISTON = 33;
-	private static final int REDSTONE_TORCH = 75;
-	/** The lit one, which is a block of its own rather than a state of the one above. */
-	private static final int LIT_REDSTONE_TORCH = 76;
+	/** The one the game switches a redstone torch to when the circuit takes its power away. */
+	private static final int UNLIT_REDSTONE_TORCH = 75;
+	/** The redstone torch, being the half of that pair anybody ever puts down. */
+	private static final int REDSTONE_TORCH = 76;
 	/** The metadata a torch carries when it stands on the floor rather than hanging on a wall. */
 	private static final int TORCH_ON_FLOOR = 5;
 	/** The metadata a torch carries when it hangs on the block to its east - the side of it that
@@ -3024,7 +3025,7 @@ public final class SmokeTest {
 		// it down. Two of them, because one wire on its own tells nobody: a wire landing looks for
 		// other wires beside it and tells their neighbours, so it takes the second wire to reach past
 		// the first one and ask the torch whether it still has a wall.
-		blocks[1][1][1] = REDSTONE_TORCH;
+		blocks[1][1][1] = UNLIT_REDSTONE_TORCH;
 		metadata[1][1][1] = TORCH_AGAINST_EAST;
 		blocks[2][1][1] = COBBLESTONE;
 		blocks[1][1][2] = REDSTONE_WIRE;
@@ -3072,7 +3073,7 @@ public final class SmokeTest {
 			SchematicPaste.write(world, state);
 
 			check("the wall torch is where it was put",
-					world.getBlockId(pasteX + 1, pasteY + 1, pasteZ + 1), REDSTONE_TORCH);
+					world.getBlockId(pasteX + 1, pasteY + 1, pasteZ + 1), UNLIT_REDSTONE_TORCH);
 			check("on the wall it was saved against",
 					world.method_1778(pasteX + 1, pasteY + 1, pasteZ + 1), TORCH_AGAINST_EAST);
 			check("the wall itself is there to be on",
@@ -3138,7 +3139,7 @@ public final class SmokeTest {
 		metadata[1][1][1] = EXTENDED + SIDE_UP;
 		blocks[1][2][1] = PISTON_HEAD;
 		metadata[1][2][1] = SIDE_UP;
-		blocks[1][1][2] = LIT_REDSTONE_TORCH;
+		blocks[1][1][2] = REDSTONE_TORCH;
 		metadata[1][1][2] = TORCH_ON_FLOOR;
 
 		// And one with nothing holding it out at all.
@@ -3188,7 +3189,7 @@ public final class SmokeTest {
 			check("with its arm on the end of it",
 					world.getBlockId(pasteX + 1, pasteY + 2, pasteZ + 1), PISTON_HEAD);
 			check("and the torch that holds it out is there to hold it",
-					world.getBlockId(pasteX + 1, pasteY + 1, pasteZ + 2), LIT_REDSTONE_TORCH);
+					world.getBlockId(pasteX + 1, pasteY + 1, pasteZ + 2), REDSTONE_TORCH);
 
 			check("a piston with nothing holding it out took its arm in with it",
 					world.getBlockId(pasteX + 3, pasteY + 2, pasteZ + 1), 0);
@@ -3970,10 +3971,11 @@ public final class SmokeTest {
 	private static void runBlockSwapTests() {
 		Log.info("SMOKETEST: --- replacing blocks ---");
 
-		// 4 wide and 3 long: a row of cubes and stairs, a row of colours and awkward blocks, and a
-		// row of the ones whose metadata is worth the most.
-		int[][][] blocks = new int[4][1][3];
-		int[][][] metadata = new int[4][1][3];
+		// 4 wide and 4 long: a row of cubes and stairs, a row of colours and awkward blocks, a row
+		// of the ones whose metadata is worth the most, and a row of the blocks the game switches
+		// between states on its own.
+		int[][][] blocks = new int[4][1][4];
+		int[][][] metadata = new int[4][1][4];
 		blocks[0][0][0] = COBBLESTONE;
 		blocks[1][0][0] = COBBLESTONE;
 		blocks[2][0][0] = WOOD_STAIRS;
@@ -3993,16 +3995,30 @@ public final class SmokeTest {
 		blocks[2][0][2] = WOODEN_DOOR;
 		metadata[2][0][2] = DOOR_UPPER_HINGE;
 		blocks[3][0][2] = LIT_REDSTONE_ORE;
+		blocks[0][0][3] = REDSTONE_ORE;
+		blocks[1][0][3] = REDSTONE_TORCH;
+		metadata[1][0][3] = TORCH_ON_FLOOR;
+		blocks[2][0][3] = UNLIT_REDSTONE_TORCH;
+		metadata[2][0][3] = TORCH_ON_FLOOR;
 
-		Schematic schematic = new Schematic(blocks, metadata, new ArrayList<>(), 4, 1, 3);
+		Schematic schematic = new Schematic(blocks, metadata, new ArrayList<>(), 4, 1, 4);
 		BlockPalette palette = BlockPalette.of(schematic);
 
-		check("the palette has a row for each kind of block", palette.getEntries().size(), 10);
+		check("the palette has a row for each kind of block", palette.getEntries().size(), 11);
 		check("counting each of them", paletteCount(palette, COBBLESTONE, 0), 2);
 		check("telling two colours of one block apart", paletteCount(palette, WOOL, 0), 1);
 		check("as a row of its own", paletteCount(palette, WOOL, RED_WOOL), 1);
 		check("while one block facing two ways is a single row", paletteCount(palette, WOOD_STAIRS, 0), 2);
 		check("and air is no row at all", paletteCount(palette, 0, 0), 0);
+
+		// --- the two halves of a pair, counted as the one block anybody puts down ---
+		check("a redstone torch the circuit had switched off is a redstone torch",
+				paletteCount(palette, REDSTONE_TORCH, 0), 2);
+		check("with no row of its own for the half the file caught it in",
+				paletteCount(palette, UNLIT_REDSTONE_TORCH, 0), 0);
+		check("lit redstone ore is redstone ore the same way",
+				paletteCount(palette, REDSTONE_ORE, 0), 2);
+		check("and none of its own either", paletteCount(palette, LIT_REDSTONE_ORE, 0), 0);
 
 		// --- what may stand in for what ---
 		BlockPalette.Entry cobblestone = paletteEntry(palette, COBBLESTONE, 0);
@@ -4017,8 +4033,8 @@ public final class SmokeTest {
 
 		checkTrue("a block with a block entity can be replaced by nothing at all",
 				!paletteEntry(palette, CHEST, 0).hasReplacements());
-		checkTrue("but the lit half of a pair can still be replaced",
-				paletteEntry(palette, LIT_REDSTONE_ORE, 0).hasReplacements());
+		checkTrue("but the row the lit half was counted under can still be replaced",
+				paletteEntry(palette, REDSTONE_ORE, 0).hasReplacements());
 
 		BlockPalette.Entry stairs = paletteEntry(palette, WOOD_STAIRS, 0);
 		check("stairs have one other kind of stairs to be", stairs.getReplacements().size(), 1);
@@ -4028,10 +4044,14 @@ public final class SmokeTest {
 		check("a door has the other door", door.getReplacements().size(), 1);
 		checkTrue("and it is the iron one", offers(door, IRON_DOOR, 0));
 
+		// The one pair of blocks that pass every test a family sets and are still kept apart: same
+		// shape, same walls, same metadata, and one of them a light while the other is a signal.
 		BlockPalette.Entry torch = paletteEntry(palette, TORCH, 0);
-		checkTrue("a torch may become a redstone torch", offers(torch, LIT_REDSTONE_TORCH, 0));
-		checkTrue("but not the unlit one, which is the same thing twice",
-				!offers(torch, REDSTONE_TORCH, 0));
+		checkTrue("a torch cannot become a redstone torch", !offers(torch, REDSTONE_TORCH, 0));
+		checkTrue("nor the unlit one behind it", !offers(torch, UNLIT_REDSTONE_TORCH, 0));
+		checkTrue("and has nothing else to be either", !torch.hasReplacements());
+		checkTrue("a redstone torch has nothing to become in its turn",
+				!paletteEntry(palette, REDSTONE_TORCH, 0).hasReplacements());
 
 		BlockPalette.Entry leaves = paletteEntry(palette, LEAVES, 2);
 		checkTrue("leaves of one kind may become another", offers(leaves, LEAVES, 0));
@@ -4059,8 +4079,6 @@ public final class SmokeTest {
 				BlockSwap.metadataFor(WOOD_STAIRS, 3, COBBLESTONE_STAIRS, 0), 3);
 		check("and one laid upside down stays upside down",
 				BlockSwap.metadataFor(WOOD_STAIRS, 4 | 2, COBBLESTONE_STAIRS, 0), 4 | 2);
-		check("a torch keeps the wall it hangs on",
-				BlockSwap.metadataFor(TORCH, TORCH_AGAINST_EAST, LIT_REDSTONE_TORCH, 0), TORCH_AGAINST_EAST);
 		check("a door keeps its half and its hinge",
 				BlockSwap.metadataFor(WOODEN_DOOR, DOOR_UPPER_HINGE, IRON_DOOR, 0), DOOR_UPPER_HINGE);
 		check("leaves keep the flag that stops them rotting",
@@ -4089,6 +4107,14 @@ public final class SmokeTest {
 		check("the one that was white is blue", schematic.getMetadata(0, 0, 1), BLUE_WOOL);
 		check("and the red one is still red", schematic.getMetadata(1, 0, 1), RED_WOOL);
 		check("both of them still wool", schematic.getBlockId(1, 0, 1), WOOL);
+
+		// A row counted two blocks under one name has to change both of them or the number it was
+		// showing was never true of anything.
+		BlockPalette.Entry ore = paletteEntry(palette, REDSTONE_ORE, 0);
+		check("replacing a row reaches every block counted under it",
+				BlockPalette.replace(schematic, ore, choice(ore, STONE, 0)), 2);
+		check("the one the file caught lit is the new block", schematic.getBlockId(3, 0, 2), STONE);
+		check("and so is the one it did not", schematic.getBlockId(0, 0, 3), STONE);
 
 		Log.info("SMOKETEST: --- replacing blocks done ---");
 	}

@@ -14,9 +14,9 @@ import java.util.List;
  * <p>So every block the mod knows about belongs to a family, and a block may only be swapped for
  * another in the same family. A family is not "looks similar" - it is a promise that the metadata
  * means the same thing to every block in it, which is what lets the old value simply be carried
- * over. Stairs turn the way stairs turn; a torch hangs where a torch hangs. Everything below is
- * keyed on raw numeric ids for the same reason {@link BlockTransform} is: a schematic is a stream
- * of numbers, and the tables stay readable and mapping-independent that way.
+ * over. Stairs turn the way stairs turn, and a door knows which half of itself it is. Everything
+ * below is keyed on raw numeric ids for the same reason {@link BlockTransform} is: a schematic is a
+ * stream of numbers, and the tables stay readable and mapping-independent that way.
  *
  * <p>Two masks per block do the work. {@code carry} is the metadata a block understands and will
  * take from another - the bits copied across a swap. {@code orient} is the part of that the build
@@ -31,6 +31,13 @@ import java.util.List;
  * behind at a position that is no longer its block: a chest's contents hanging in a wall of stone.
  * Water, fire, portals and piston heads are in no family either, being placed by something other
  * than a player putting a block down.
+ *
+ * <p>Nor are torches, which is the one case where two blocks pass every test a family sets and are
+ * still kept apart. A torch and a redstone torch are the same shape, hang on the same walls and
+ * mean the same thing by their metadata - and one of them is a light while the other is a signal.
+ * A wall of torches swapped for redstone torches is not the same build in another material, it is a
+ * different circuit, and a list of what a block could be instead is no place to be offered that.
+ * Nothing else in the game is torch-shaped, so what is left of the family is nothing at all.
  */
 public final class BlockSwap {
 	/** How many block ids there are to have an opinion about. */
@@ -44,16 +51,18 @@ public final class BlockSwap {
 	private static final int SLAB = 3;
 	/** Cross-shaped, no collision, broken by a touch: flowers, mushrooms, saplings, grass. */
 	private static final int PLANT = 4;
-	private static final int TORCH = 5;
-	private static final int RAIL = 6;
-	private static final int DOOR = 7;
-	private static final int PRESSURE_PLATE = 8;
+	private static final int RAIL = 5;
+	private static final int DOOR = 6;
+	private static final int PRESSURE_PLATE = 7;
 
 	/**
-	 * A block that may be replaced but never offered as the replacement. Every one of them is the
-	 * lit or powered half of a pair the game switches between on its own, and both halves carry the
-	 * same name - so offering it would put two rows reading "Redstone Torch" in a list where only
-	 * one of them is the one anybody means.
+	 * A block that may be replaced but never offered as the replacement: the lit half of a pair the
+	 * game switches between on its own.
+	 *
+	 * <p>{@code BlockPalette} counts a schematic's lit redstone ore as redstone ore, so a row for
+	 * the lit half is never on the screen to begin with; this is the other end of the same rule.
+	 * What a block could be instead is a list of blocks to go and get, and the state a block is put
+	 * into by being walked past is not one of them.
 	 */
 	private static final int NOT_OFFERED = 1;
 
@@ -139,7 +148,6 @@ public final class BlockSwap {
 			{   40, PLANT,              0x0,   0x0001,   0x0,    0x0,    ANY,      0 },  // red mushroom
 			{   43, CUBE,               0x3,   0x000F,   0x0,    0x0,    ANY,      0 },  // double slab
 			{   44, SLAB,               0x3,   0x000F,   0x8,    0x8,    ANY,      0 },  // slab
-			{   50, TORCH,              0x0,   0x0001,   0x7,    0x7, 0x003E,      0 },  // torch, hanging or standing
 			{   53, STAIRS,             0x0,   0x0001,   0x7,    0x7,    ANY,      0 },  // wooden stairs
 			{   64, DOOR,               0x0,   0x0001,   0xF,    0xF,    ANY,      0 },  // wooden door
 			{   66, RAIL,               0x0,   0x0001,   0xF,    0xF, 0x03FF,      0 },  // rail: 6 to 9 are the curves
@@ -148,8 +156,6 @@ public final class BlockSwap {
 			{   71, DOOR,               0x0,   0x0001,   0xF,    0xF,    ANY,      0 },  // iron door
 			{   72, PRESSURE_PLATE,     0x0,   0x0001,   0x1,    0x0,    ANY,      0 },  // wooden pressure plate
 			{   74, CUBE,               0x0,   0x0001,   0x0,    0x0,    ANY, NOT_OFFERED },  // redstone ore, lit
-			{   75, TORCH,              0x0,   0x0001,   0x7,    0x7, 0x003E, NOT_OFFERED },  // redstone torch, off
-			{   76, TORCH,              0x0,   0x0001,   0x7,    0x7, 0x003E,      0 },  // redstone torch
 			{   86, CUBE,               0x0,   0x0001,   0x3,    0x0,    ANY,      0 },  // pumpkin
 			{   91, CUBE,               0x0,   0x0001,   0x3,    0x0,    ANY,      0 },  // jack o'lantern
 	};

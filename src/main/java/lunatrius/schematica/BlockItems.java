@@ -173,6 +173,34 @@ public final class BlockItems {
 		return 1;
 	}
 
+	/**
+	 * Blocks the game turns on and off by itself, each paired with the half of it a player actually
+	 * puts down. A redstone torch that happens to be off is a redstone torch, and a furnace that
+	 * happens to be smelting is a furnace.
+	 *
+	 * <p>Which half a schematic holds is a circuit caught mid-tick rather than anything anybody
+	 * chose, so a list of what a build is made of has no business holding both. Kept apart from
+	 * {@link #MATERIALS} because that table answers what to carry rather than what a block is - and
+	 * for three of these the item and the block share a number, which is a coincidence of how block
+	 * items are registered and not a rule to lean on.
+	 */
+	private static final int[][] SWITCHED = {
+			{ 62, 61 },  // furnace, lit         -> furnace
+			{ 74, 73 },  // redstone ore, lit    -> redstone ore
+			{ 75, 76 },  // redstone torch, off  -> redstone torch
+			{ 94, 93 },  // repeater, powered    -> repeater
+	};
+
+	/** The block a player puts down to get this one, which for all but a handful is itself. */
+	public static int placedForm(int blockId) {
+		for (int[] pair : SWITCHED) {
+			if (pair[0] == blockId) {
+				return pair[1];
+			}
+		}
+		return blockId;
+	}
+
 	public static Item itemAt(int itemId) {
 		return itemId > 0 && itemId < Item.ITEMS.length ? Item.ITEMS[itemId] : null;
 	}

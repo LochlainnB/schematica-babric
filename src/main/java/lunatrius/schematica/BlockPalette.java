@@ -26,6 +26,12 @@ import net.minecraft.item.ItemStack;
  * build is made of and two things to point at, while a stair facing north and a stair facing south
  * are one thing put down twice. {@link BlockSwap} draws that line.
  *
+ * <p>The half of a pair the game switches between on its own is not a kind of block of its own. A
+ * redstone torch is counted as a redstone torch whether the file caught it lit or not, and a
+ * furnace as a furnace whether or not it was smelting at the time. That is {@link BlockItems}'
+ * answer, so it is the same answer the material list gets, and a schematic saved a second later
+ * reads as the same schematic.
+ *
  * <p>Counting is a walk of every block in the schematic, so the screen holding this counts once and
  * again after each replacement, rather than on every frame or resize.
  */
@@ -143,6 +149,10 @@ public final class BlockPalette {
 			return;
 		}
 
+		// A redstone torch the schematic caught with the power on is a redstone torch, and belongs
+		// on the row with the rest of them rather than on one of its own reading the same name.
+		blockId = BlockItems.placedForm(blockId);
+
 		int variant = BlockSwap.variantOf(blockId, metadata);
 		int key = blockId * VARIANTS + variant;
 		Entry entry = rows.get(key);
@@ -171,7 +181,9 @@ public final class BlockPalette {
 	 *
 	 * <p>Each block's metadata is worked out from its own, so a stair that was facing north still
 	 * faces north and the one beside it facing east still faces east. The row being replaced was
-	 * counted from this same schematic, so what is found here is what the row said would be.
+	 * counted from this same schematic, so what is found here is what the row said would be -
+	 * including the blocks that were counted under another id than the one they are stored as, a
+	 * row of redstone torches being every redstone torch whichever way the circuit had them.
 	 */
 	public static int replace(Schematic schematic, Entry from, Entry to) {
 		if (schematic == null || from == null || to == null) {
@@ -183,12 +195,12 @@ public final class BlockPalette {
 			for (int y = 0; y < schematic.getHeight(); y++) {
 				for (int z = 0; z < schematic.getLength(); z++) {
 					int blockId = schematic.getBlockId(x, y, z);
-					if (blockId != from.blockId) {
+					if (BlockItems.placedForm(blockId) != from.blockId) {
 						continue;
 					}
 
 					int metadata = schematic.getMetadata(x, y, z);
-					if (BlockSwap.variantOf(blockId, metadata) != from.variant) {
+					if (BlockSwap.variantOf(from.blockId, metadata) != from.variant) {
 						continue;
 					}
 

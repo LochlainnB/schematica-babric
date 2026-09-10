@@ -197,12 +197,11 @@ one row, since which way a stair turns is not what a stair is.
 A schematic is a shape, and most of what makes it that shape is in the metadata: which way a stair
 turns, which wall a torch hangs on, which half of a door this is. So every block belongs to a
 family, and a swap only ever happens inside one - full cubes for full cubes, stairs for stairs,
-slabs for slabs, torches for torches, rails for rails, doors for doors, plants for plants, pressure
-plates for pressure plates. A family is not "looks similar": it is a promise that the metadata means
-the same thing to everything in it, which is what lets the old value simply be carried over.
-Cobblestone stairs put where wooden stairs were face the way the wooden ones did, each of them its
-own way, and a torch that hung on the east wall still hangs on the east wall once it is a redstone
-torch.
+slabs for slabs, rails for rails, doors for doors, plants for plants, pressure plates for pressure
+plates. A family is not "looks similar": it is a promise that the metadata means the same thing to
+everything in it, which is what lets the old value simply be carried over. Cobblestone stairs put
+where wooden stairs were face the way the wooden ones did, each of them its own way, and an iron
+door put where a wooden one was is still the top half of a door hinged the way that one was.
 
 Glass and ice are in with stone and cobblestone, being the same shape - what the light does
 afterwards is usually the point of making the swap. Sand and gravel are there too, and will fall
@@ -227,9 +226,19 @@ position that is no longer its block, a chest's contents hanging inside a wall o
 still listed, with the button greyed out. So are the blocks nobody places - water, fire, portals,
 piston heads - for the same reason they have no material list row.
 
-Two blocks that are one block in two states - redstone ore lit and unlit, a redstone torch on and
-off - can be replaced but are never offered as the replacement. Both halves carry the same name, and
-a list with two identical rows in it is one you cannot choose from.
+Torches are the one pair of blocks that pass every test a family sets and are still kept apart. A
+torch and a redstone torch are the same shape, hang on the same walls and mean the same thing by
+their metadata - and one of them is a light while the other is a signal. A wall of torches swapped
+for redstone torches is not the same build in another material, it is a different circuit, so
+neither is ever offered the other. Nothing else in the game is torch-shaped, which leaves both rows
+with the button greyed out.
+
+Two blocks that are one block in two states are counted as one. A redstone torch is a redstone
+torch whether the file caught it lit or not, a furnace is a furnace whether or not it was smelting,
+and lit redstone ore is redstone ore. Which half a schematic holds is a circuit caught mid-tick
+rather than anything you chose, and a list with two rows reading "Redstone Torch" in it is one you
+cannot choose from. Replacing that one row reaches every block counted under it, whichever way the
+circuit had them.
 
 #### Saving
 
@@ -727,20 +736,23 @@ under them is not something a check can say.
 Replacing blocks is checked on a schematic written for the checking, since the cases that matter are
 the awkward blocks and a structure holding all of them is easier to write down than to build. The
 palette is asked to have a row per kind of block, to count each of them, to put two colours of one
-block in two rows and one block facing two ways in one, and to have no row at all for air. Then each
-family is asked what it will and will not offer: a full cube offered another full cube, one the
-light comes through and one of a colour, and refused a stair, a chest and itself; stairs offered
-nothing but the other stairs and a door nothing but the other door; a torch offered the redstone
-torch and not the unlit one that shares its name; a chest offered nothing whatever. The rail is the
-one that has to be asked twice - a schematic with a bend in it is refused the powered rail, and one
-of nothing but straight and sloped rails is offered it, which is the whole of what deciding against
-the metadata a schematic is holding comes to. Then the metadata carried across a swap is checked one
-case at a time: the way a stair faces and that it is still upside down, the wall a torch hangs on, a
-door's half and its hinge, a slab still laid upside down, the flag on a leaf, the current dropped
-from a powered rail becoming a plain one, and a colour dropped going one way and given going the
-other. Last the swap is applied to the schematic and the blocks read back - two stairs each still
-facing their own way, the cobblestone beside them untouched, and one colour of wool changed with the
-other left as it was.
+block in two rows and one block facing two ways in one, and to have no row at all for air. It is
+also asked for the rows it should not have: a redstone torch saved lit and one saved unlit counted
+as two redstone torches on one row with none of its own for the second, and lit redstone ore counted
+the same way. Then each family is asked what it will
+and will not offer: a full cube offered another full cube, one the light comes through and one of a
+colour, and refused a stair, a chest and itself; stairs offered nothing but the other stairs and a
+door nothing but the other door; a chest offered nothing whatever; a torch refused the redstone
+torch, the unlit one behind it and everything else, and the redstone torch refused in its turn. The
+rail is the one that has to be asked twice - a schematic with a bend in it is refused the powered
+rail, and one of nothing but straight and sloped rails is offered it, which is the whole of what
+deciding against the metadata a schematic is holding comes to. Then the metadata carried across a
+swap is checked one case at a time: the way a stair faces and that it is still upside down, a door's
+half and its hinge, a slab still laid upside down, the flag on a leaf, the current dropped from a
+powered rail becoming a plain one, and a colour dropped going one way and given going the other.
+Last the swap is applied to the schematic and the blocks read back - two stairs each still facing
+their own way, the cobblestone beside them untouched, one colour of wool changed with the other left
+as it was, and a row that counted two blocks under one name changing both of them.
 
 The two screens are driven the way a player drives them, on a schematic and a file of their own so
 that saving cannot write over the one the rest of the run is watching. A click on a row away from
