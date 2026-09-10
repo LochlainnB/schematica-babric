@@ -229,8 +229,13 @@ public final class BlockPalette {
 	 *
 	 * <p>The item rather than the block, so a door row shows a door and not the half-drawn face a
 	 * door block wears, which is the same choice - and the same icon - the material list makes.
+	 *
+	 * <p>Public because {@link SchematicVerify} draws its rows the same way. That is a different
+	 * question asked about the same schematic, and a block ought to be the same block on both
+	 * screens: the row saying a wall is twelve red wool short and the row offering to make it white
+	 * instead are about one thing, and would read oddly if they disagreed about what to call it.
 	 */
-	private static ItemStack stackFor(int blockId, int variant) {
+	public static ItemStack stackFor(int blockId, int variant) {
 		int itemId = BlockItems.itemFor(blockId);
 		return ItemNames.stack(itemId > 0 ? itemId : blockId, variant);
 	}
@@ -244,7 +249,7 @@ public final class BlockPalette {
 	 * mod's own file has the name instead, since a list where two rows read the same is a list you
 	 * cannot choose from.
 	 */
-	private static String nameFor(int blockId, int variant, ItemStack stack) {
+	public static String nameFor(int blockId, int variant, ItemStack stack) {
 		String key = "schematic.block." + blockId + "." + variant;
 		String name = Translations.get(key);
 		return name.equals(key) ? ItemNames.of(stack) : name;

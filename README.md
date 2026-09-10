@@ -7,11 +7,13 @@ A port of Lunatrius' Schematica 1.2.0.10 for Minecraft Beta 1.7.3 from Risugami'
 Load an MCEdit `.schematic` file and it is drawn over the world as a ghost you can build against,
 with colour-coded boxes showing what is missing or wrong. You can also select a region of the world
 and save it back out as a schematic. A material list says what the whole thing will take and counts
-down as you gather it, on a screen or in the corner of the screen while you build. Any block in a
-schematic can be swapped for another that leaves the build standing, keeping which way it faces. In
-a creative single player world, one button builds the whole thing where it stands. Several can be
-open at once, each standing in its own place. What you had open is still open when you next log in,
-in the place you left it, for each world and server separately.
+down as you gather it, on a screen or in the corner of the screen while you build. Verify holds the
+build up against the schematic and says what is not placed, what was placed wrongly, and what is
+standing in the way of the rest. Any block in a schematic can be swapped for another that leaves the
+build standing, keeping which way it faces. In a creative single player world, one button builds the
+whole thing where it stands. Several can be open at once, each standing in its own place. What you
+had open is still open when you next log in, in the place you left it, for each world and server
+separately.
 
 ## Using it
 
@@ -443,6 +445,73 @@ blocks go down in 31 ms in the dev run, with the lighting the game queues behind
 the next few ticks. The ghost disappears as it lands, because there is nothing left for it to draw -
 every block it was asking for is now standing there.
 
+### Verifying a build
+
+The **Verify** button on the move screen holds the schematic up against the world it is standing in
+and lists everywhere the two disagree: what has not been placed, what has been placed wrongly, and
+what is standing where the schematic wants nothing at all. It checks the one the picker is on, like
+everything else on that screen.
+
+The overlay has been drawing this comparison all along - the coloured boxes are the same question,
+asked one cell at a time as the geometry is built. What it cannot do is count. At the end of a build
+what is left is a handful of blocks somewhere in a hundred thousand, and a box you have to find
+before you can see it is no help at all. So this is the same question asked of every cell at once,
+with the answer written down rather than painted into the world.
+
+Rows are grouped by the block and the way it is wrong, in the same order the material list uses -
+most of it first, alphabetical between rows of the same size. Under each row is what is wrong with
+it and where the nearest one of them is, so a row is somewhere to walk to rather than only something
+to know. Each is in the colour of the box the overlay draws on it, so the row and the thing it is
+about are the same colour before you have read either.
+
+| Row              | What it means                                                    |
+| ---------------- | ---------------------------------------------------------------- |
+| Not placed       | The schematic asks for a block here and nothing is standing      |
+| Wrong block      | Something else is standing here; the row says what               |
+| Wrong way round  | The right block, turned or set differently from the schematic    |
+| In the way       | The schematic asks for nothing here and something is standing    |
+
+The last of those is the one the overlay has no way of showing you. The other three are drawn on the
+block that ought to be there; a cell that should be empty has nothing to hang a box on, because what
+is wrong with it is that it is full. It is also the row that decides whether a paste will land
+cleanly - see **Paste Air** above - and the one that says a build is standing in the hill rather
+than in the space cut for it.
+
+**Check again** takes the reading afresh. The list is a snapshot on purpose: it is a walk of every
+cell of the schematic against every cell of the world under it, which for a large schematic is a
+million reads, and it is meant to hold still while you read it, note what is missing and go and fix
+it. Nothing about it keeps up on its own.
+
+Verify reads and never writes, which makes it the one thing next to Paste on that screen that works
+on a server exactly as it does in single player.
+
+#### What counts as wrong
+
+What is compared is what somebody chose, not everything the game happens to be storing. A block the
+game switches between two ids on its own is compared as the one that was put down - a lit furnace is
+a furnace, a redstone torch is a redstone torch whichever way the circuit has it - and the parts of a
+block's metadata that are the game's own business are masked off before the two are held against
+each other.
+
+So a door standing open is the same door, a lever thrown is the same lever, a button pressed is the
+same button, a wire carrying power is the same wire, and leaves are the leaves of whichever tree
+they came off however far along their decay check is. What is kept is everything that says something
+about the build: which way a stair turns, what colour the wool is, how long a repeater waits, which
+half of a door this is. Without that line a finished build reports itself broken the moment somebody
+opens a door, and with it drawn too far a stair facing the wrong way goes unreported - which is the
+thing the check exists to catch.
+
+Water and lava are compared as the substance rather than as the flow. A pool saved into a schematic
+and the same pool in the world will not agree about which cells of it are running, and a report
+saying "wrong block: water, found water" would be telling the truth uselessly.
+
+Two kinds of cell are not judged at all, and are counted under the list rather than folded into it,
+because a cell that was not checked is not a cell that was found to be right. One is a cell wanting a
+block this version of the game does not have, which is a schematic written by a later one. The other
+is a cell whose chunk the client has not been sent - reading it anyway gives air, and air read out of
+a chunk nobody has been sent would report a finished build as one that had never been started. That
+is what you get verifying a build from across the map, and the line under the list is what says so.
+
 ### Coordinates
 
 Every coordinate on the move and save screens can be typed as well as nudged. Click the number,
@@ -579,9 +648,10 @@ gui/         AxisScreen          routes clicks, keys and the tab order to the fo
              MaterialListWidget    one row of it: the icon, the name and the two counts
              InfoHud               the same list in the corner of the screen, while playing
              SchematicPickerWidget which of the open schematics the move screen is pointed at
-             BlockListScreen       what the two screens below share: rows, icons and the scrolling
+             BlockListScreen       what the three screens below share: rows, icons and scrolling
              BlockReplaceScreen    every kind of block in the schematic, each with a Replace button
              BlockChoiceScreen     what one of them could be swapped for
+             SchematicVerifyScreen what is wrong with a build, held against its schematic
              four more Screens and a slider widget
 compat/      ModMenuIntegration  optional, loaded only when Mod Menu asks for it
              CreativeMode        optional, asks BHCreative whether the player is in creative mode
@@ -593,10 +663,11 @@ EasyPlace          what a right click is allowed to do while easy place is on
 HotbarRestock      brings a block onto the hotbar, and waits for the server to agree
 Sightline          walks the blocks along the line of sight, nearest first
 SchematicPaste     writing a schematic into the world at once, and who is allowed to
+SchematicVerify    a build held up against its schematic, and everywhere the two disagree
 MaterialList       what a schematic is built out of, counted against an inventory
 BlockPalette       what it is made of block by block, and the swapping of one of them for another
 SchematicMemory    what was open in each world, kept between sessions
-BlockItems         which item puts a block down, and what you would go and fetch for it
+BlockItems         which item puts a block down, what to fetch for it, and what of it was chosen
 ```
 
 `Schematic` is deliberately free of world and rendering state, which is what lets `MaterialList`
@@ -639,6 +710,11 @@ Behaviour is otherwise the same as 1.2.0.10; these are deliberate changes:
   build entirely to you. This counts it, in the items you would go and fetch, and counts your
   inventory against it - on a screen, or in a HUD in the corner listing only what is still short,
   with what each row comes to in the stacks you would carry it in as well as in blocks.
+- **A build can be checked against its schematic.** The original drew the same comparison the
+  overlay still draws, and could only ever draw it: to find what was left you had to go and look
+  for a coloured box. **Verify** counts it instead - what is not placed, what is the wrong block,
+  what is turned the wrong way, and what is standing where the schematic wants nothing, which is
+  the one of the four the overlay has no way of showing at all.
 - **Schematics can be deleted from the game.** The original could only ever add to the folder, so
   tidying one up meant leaving the game and finding it on disk. **Delete** on the load screen takes
   the highlighted file away on a second press, into the platform's wastebasket where there is one.
@@ -822,6 +898,30 @@ Scene 22 is the replace screen over a schematic written to be mostly rows that s
 a piston with its arm out, another block halfway through being pushed, a redstone torch saved twice
 with the circuit each way, and a plain torch. Six kinds of block go in and four rows come out, with
 Replace greyed on both kinds of torch - the shot is of what is missing from it.
+
+Verifying is checked on a schematic built for it, because the four ways a cell can be wrong have to
+be arranged one at a time. An emptied box is asked about first and checked to come back as the whole
+schematic missing under one heading, with the floor's row counting every block of it and pointing at
+the nearest one of them in all three axes. The schematic is then pasted into that box and the check
+asked again, where nothing at all may be wrong with a build written straight out of the file it is
+being held against. Then it is taken apart one fault at a time: a block removed is a row saying it is
+not there, the wrong block in its place is a different row naming what is standing there instead, a
+stair turned is a row about metadata rather than about the block, and something dropped into a cell
+the schematic wants nothing in is the fourth kind. Each is checked to be the only fault in the box,
+so a rule that started firing twice would be named rather than absorbed.
+
+Two things are checked not to be faults at all - a redstone torch the circuit has switched off, and a
+wire with power running through it - since a check that called either of them wrong would hand back a
+list of nothing but them. Which of a block's metadata anybody chose is then checked as a table on its
+own, both halves of it: a stair keeps its facing and wool its colour, while an open door, a thrown
+lever, a pushed piston, a decaying leaf and a growing crop each come back as the block somebody put
+there.
+
+The screen is opened over a world with exactly one thing wrong in it, and that one thing is put right
+while the screen is still up: the list has to be unchanged until **Check again** is clicked, which is
+the snapshot being a snapshot on purpose. Scene 23 is that screen over a build damaged in all four
+ways at once - four kinds of row, four colours and a second line under each are a layout rather than
+a number, and a screenshot is the only thing that can be looked at.
 
 Remembering what was open is checked from both ends. The name the mod gave the test world on its own
 is asserted to be the folder that world was started from, and on a server the address the connection

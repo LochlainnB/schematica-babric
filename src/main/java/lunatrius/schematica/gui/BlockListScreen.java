@@ -72,8 +72,16 @@ public abstract class BlockListScreen extends Screen {
 	@Override
 	public void init() {
 		int nextId = this.initControls();
-		this.list = new BlockListWidget(this, LIST_TOP, this.listBottom(), ROW_HEIGHT);
+		this.list = new BlockListWidget(this, LIST_TOP, this.listBottom(), this.rowHeight());
 		this.list.registerButtons(this.buttons, nextId, nextId + 1);
+	}
+
+	/**
+	 * How tall a row is. One line of text beside an icon, unless a screen says otherwise: the
+	 * verify list puts a second line under each row saying what is wrong with it and where.
+	 */
+	protected int rowHeight() {
+		return ROW_HEIGHT;
 	}
 
 	protected int listBottom() {

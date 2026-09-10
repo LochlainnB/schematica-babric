@@ -9,6 +9,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
 
+import lunatrius.schematica.BlockItems;
 import lunatrius.schematica.BlockPalette;
 import lunatrius.schematica.EasyPlace;
 import lunatrius.schematica.HotbarRestock;
@@ -18,6 +19,7 @@ import lunatrius.schematica.SchematicMemory;
 import lunatrius.schematica.SchematicPaste;
 import lunatrius.schematica.Schematica;
 import lunatrius.schematica.SchematicaConfig;
+import lunatrius.schematica.SchematicVerify;
 import lunatrius.schematica.SchematicaState;
 import lunatrius.schematica.compat.CreativeMode;
 import lunatrius.schematica.gui.BlockChoiceScreen;
@@ -29,6 +31,7 @@ import lunatrius.schematica.gui.SchematicControlScreen;
 import lunatrius.schematica.gui.SchematicLoadScreen;
 import lunatrius.schematica.gui.SchematicSaveScreen;
 import lunatrius.schematica.gui.SchematicaKeysScreen;
+import lunatrius.schematica.gui.SchematicVerifyScreen;
 import lunatrius.schematica.gui.SchematicaSettingsScreen;
 import lunatrius.schematica.render.SchematicRenderer;
 import lunatrius.schematica.schematic.BlockSwap;
@@ -131,6 +134,24 @@ public final class SmokeTest {
 	private static final int PISTON_TEST_HEIGHT = 3;
 	private static final int PISTON_TEST_LENGTH = 4;
 	private static final int COBBLESTONE = 4;
+
+	/** The schematic the verify checks build for themselves: a floor with four blocks on one edge. */
+	private static final int VERIFY_WIDTH = 5;
+	private static final int VERIFY_HEIGHT = 2;
+	private static final int VERIFY_LENGTH = 4;
+	/** The larger one the verify scene builds, damages, and shoots the report of. */
+	private static final String VERIFY_FILE = "smoketest-verify-scene.schematic";
+	private static final int VERIFY_SCENE_WIDTH = 8;
+	private static final int VERIFY_SCENE_HEIGHT = 3;
+	private static final int VERIFY_SCENE_LENGTH = 5;
+	/** Which way its stair is saved facing, and the way the checks turn it to make that a fault. */
+	private static final int VERIFY_STAIRS_FACING = 2;
+	private static final int VERIFY_STAIRS_TURNED = 3;
+	/** What a redstone wire's metadata reads as with a torch beside it. */
+	private static final int VERIFY_FULL_POWER = 15;
+	/** The world's ceiling, which is where a schematic starts having layers with nowhere to be. */
+	private static final int MAX_WORLD_Y = 127;
+
 	private static final int SNOW_LAYER = 78;
 	private static final int SAND = 12;
 	private static final int REDSTONE_WIRE = 55;
@@ -139,6 +160,10 @@ public final class SmokeTest {
 	private static final int WOODEN_DOOR_ITEM = 324;
 	/** The metadata bit the top half of a door carries, which no item places. */
 	private static final int DOOR_TOP = 8;
+	/** The metadata bit a door carries while it is open, which is nothing about the build. */
+	private static final int DOOR_OPEN = 4;
+	private static final int LEVER = 69;
+	private static final int WHEAT = 59;
 	private static final int PISTON_HEAD = 34;
 	/** The block a piston is halfway through pushing, which is another one nobody put there. */
 	private static final int MOVING_PISTON = 36;
@@ -380,6 +405,7 @@ public final class SmokeTest {
 				// loadAndTransform puts the right one back straight afterwards.
 				runWallTorchTests(mc);
 				runPistonTests(mc);
+				runVerifyTests(mc);
 				loadAndTransform(mc);
 				phase = Phase.SHOOT;
 				ticks = 0;
@@ -505,6 +531,7 @@ public final class SmokeTest {
 		runMaterialListTests();
 		runInfoHudTests();
 		runBlockSwapTests();
+		runPlacedMetadataTests();
 
 		Log.info("SMOKETEST: --- data layer done ---");
 	}
@@ -2470,6 +2497,9 @@ public final class SmokeTest {
 				Schematica.CONFIG.infoHud = false;
 				setUpSwitchedBlockScene(mc);
 				return;
+			case 22:
+				setUpVerifyScene(mc);
+				return;
 			default:
 				mc.setScreen(null);
 				if (WORLD_TEST && !MULTIPLAYER) {
@@ -3366,6 +3396,299 @@ public final class SmokeTest {
 		}
 
 		Log.info("SMOKETEST: --- pasting a piston that is out done ---");
+	}
+
+	/**
+	 * Reading a world back against the schematic standing in it.
+	 *
+	 * <p>Builds its own schematic, because the four ways a cell can be wrong have to be arranged one
+	 * at a time and each of them checked on its own - and because two of the things worth proving
+	 * are the faults that are <em>not</em> reported: a redstone torch the circuit has switched off
+	 * and a wire with power running through it are the same torch and the same wire, and a check
+	 * that called either of them a fault would hand back a list of nothing but them.
+	 *
+	 * <p>Every poke at the world here goes through the raw setter. What is being measured is what
+	 * one cell reads as, and telling the neighbours would let a redstone circuit rearrange the rest
+	 * of the box between the change and the count.
+	 *
+	 * <p>Puts the world back the way it found it. The schematic it loads is replaced by the caller's
+	 * own load straight afterwards, the same way the wall torch and piston checks are.
+	 */
+	private static void runVerifyTests(Minecraft mc) {
+		Log.info("SMOKETEST: --- verifying a build against its schematic ---");
+		SchematicaState state = Schematica.STATE;
+		World world = mc.world;
+
+		int[][][] blocks = new int[VERIFY_WIDTH][VERIFY_HEIGHT][VERIFY_LENGTH];
+		int[][][] metadata = new int[VERIFY_WIDTH][VERIFY_HEIGHT][VERIFY_LENGTH];
+
+		// A floor, and on one edge of it the four blocks the checks below take apart: something
+		// plain, something with a facing, and the two the game changes on its own.
+		for (int x = 0; x < VERIFY_WIDTH; x++) {
+			for (int z = 0; z < VERIFY_LENGTH; z++) {
+				blocks[x][0][z] = COBBLESTONE;
+			}
+		}
+		blocks[0][1][0] = GOLD;
+		blocks[1][1][0] = WOOD_STAIRS;
+		metadata[1][1][0] = VERIFY_STAIRS_FACING;
+		blocks[2][1][0] = REDSTONE_TORCH;
+		metadata[2][1][0] = TORCH_ON_FLOOR;
+		blocks[3][1][0] = REDSTONE_WIRE;
+
+		int wanted = VERIFY_WIDTH * VERIFY_LENGTH + 4;
+		int volume = VERIFY_WIDTH * VERIFY_HEIGHT * VERIFY_LENGTH;
+
+		File file = new File(state.getSchematicDirectory(), "smoketest-verify.schematic");
+		try {
+			SchematicFormat.write(file, new Schematic(blocks, metadata, new ArrayList<>(),
+					VERIFY_WIDTH, VERIFY_HEIGHT, VERIFY_LENGTH));
+		} catch (java.io.IOException exception) {
+			fail("could not write the verify schematic", exception);
+			return;
+		}
+		if (!state.loadSchematic(file)) {
+			fail("loadSchematic returned false for the verify schematic", null);
+			return;
+		}
+
+		int atX = baseX;
+		int atY = baseY + PASTE_TEST_HEIGHT;
+		int atZ = baseZ;
+
+		// The four cells the checks reach for by name, and one the schematic wants nothing in.
+		int goldY = atY + 1;
+		int stairX = atX + 1;
+		int torchX = atX + 2;
+		int wireX = atX + 3;
+		int emptyX = atX + 4;
+		int emptyZ = atZ + 3;
+
+		int[][][] savedBlocks = new int[VERIFY_WIDTH][VERIFY_HEIGHT][VERIFY_LENGTH];
+		int[][][] savedMetadata = new int[VERIFY_WIDTH][VERIFY_HEIGHT][VERIFY_LENGTH];
+		for (int x = 0; x < VERIFY_WIDTH; x++) {
+			for (int y = 0; y < VERIFY_HEIGHT; y++) {
+				for (int z = 0; z < VERIFY_LENGTH; z++) {
+					savedBlocks[x][y][z] = world.getBlockId(atX + x, atY + y, atZ + z);
+					savedMetadata[x][y][z] = world.method_1778(atX + x, atY + y, atZ + z);
+					world.method_154(atX + x, atY + y, atZ + z, 0, 0);
+				}
+			}
+		}
+
+		boolean savedPasteAir = Schematica.CONFIG.pasteAir;
+		OpenSchematic open = state.getActive();
+
+		try {
+			open.offset.set(atX, atY, atZ);
+
+			// An empty box: the whole schematic is still to be built, and nothing is in the way of it.
+			SchematicVerify report = SchematicVerify.of(world, open, atX, atY, atZ);
+			check("an empty box has every cell of the schematic looked at", report.getChecked(), volume);
+			check("with none of it left unchecked",
+					report.getUnloaded() + report.getOffWorld() + report.getUnknown(), 0);
+			check("and every block the schematic asks for reported", report.getFaults(), wanted);
+			check("all of it under the one heading",
+					report.getCount(SchematicVerify.Issue.MISSING), wanted);
+			check("and nothing counted as being in the way of it",
+					report.getCount(SchematicVerify.Issue.EXTRA), 0);
+
+			SchematicVerify.Entry floor = verifyRow(report, SchematicVerify.Issue.MISSING, COBBLESTONE);
+			checkTrue("the floor has a row of its own", floor != null);
+			if (floor != null) {
+				check("counting every block of it", floor.getCount(), VERIFY_WIDTH * VERIFY_LENGTH);
+				check("pointing at the nearest one", floor.getExample().x, atX);
+				check("in every axis", floor.getExample().y, atY);
+				check("of the three", floor.getExample().z, atZ);
+				checkTrue("with nothing standing there to name", floor.getFoundName() == null);
+			}
+
+			// Built, by the one thing in the mod that builds a whole schematic at once. Nothing at all
+			// should be wrong with a build that was written out of the file being checked against.
+			Schematica.CONFIG.pasteAir = true;
+			SchematicPaste.write(world, state);
+
+			report = SchematicVerify.of(world, open, atX, atY, atZ);
+			check("a schematic just pasted has nothing wrong with it", report.getFaults(), 0);
+			checkTrue("so the list is empty", report.isEmpty());
+			check("and every cell of it was still looked at", report.getChecked(), volume);
+
+			// The two the game changes for itself. Neither is a fault, and a check that thought
+			// otherwise would report a finished redstone build as broken the moment it was switched on.
+			world.method_154(torchX, goldY, atZ, UNLIT_REDSTONE_TORCH, TORCH_ON_FLOOR);
+			report = SchematicVerify.of(world, open, atX, atY, atZ);
+			check("a redstone torch the circuit has switched off is the same torch", report.getFaults(), 0);
+			world.method_154(torchX, goldY, atZ, REDSTONE_TORCH, TORCH_ON_FLOOR);
+
+			world.method_223(wireX, goldY, atZ, VERIFY_FULL_POWER);
+			report = SchematicVerify.of(world, open, atX, atY, atZ);
+			check("and a wire with power running through it is the same wire", report.getFaults(), 0);
+			world.method_223(wireX, goldY, atZ, 0);
+
+			// One block taken back out of the finished build.
+			world.method_154(atX, goldY, atZ, 0, 0);
+			report = SchematicVerify.of(world, open, atX, atY, atZ);
+			check("a block taken out of a finished build is one fault", report.getFaults(), 1);
+			SchematicVerify.Entry gone = verifyRow(report, SchematicVerify.Issue.MISSING, GOLD);
+			checkTrue("named as the block that is not there", gone != null);
+			if (gone != null) {
+				check("at the cell it is not in", gone.getExample().y, goldY);
+				checkTrue("with nothing standing there to name instead", gone.getFoundName() == null);
+			}
+
+			// Something else in its place, which is a different fault about the same cell.
+			world.method_154(atX, goldY, atZ, COBBLESTONE, 0);
+			report = SchematicVerify.of(world, open, atX, atY, atZ);
+			check("the wrong block in its place is still one fault", report.getFaults(), 1);
+			check("but not a missing one", report.getCount(SchematicVerify.Issue.MISSING), 0);
+			SchematicVerify.Entry wrong = verifyRow(report, SchematicVerify.Issue.WRONG_BLOCK, GOLD);
+			checkTrue("the row is named for the block that should be there", wrong != null);
+			if (wrong != null) {
+				checkText("and says what is standing there instead", wrong.getFoundName(),
+						BlockPalette.nameFor(COBBLESTONE, 0, BlockPalette.stackFor(COBBLESTONE, 0)));
+			}
+
+			// The right block, turned the wrong way.
+			world.method_154(atX, goldY, atZ, GOLD, 0);
+			world.method_223(stairX, goldY, atZ, VERIFY_STAIRS_TURNED);
+			report = SchematicVerify.of(world, open, atX, atY, atZ);
+			check("a stair turned the wrong way is one fault of its own", report.getFaults(), 1);
+			checkTrue("and not the wrong block",
+					verifyRow(report, SchematicVerify.Issue.WRONG_BLOCK, WOOD_STAIRS) == null);
+			checkTrue("the row is the one about metadata",
+					verifyRow(report, SchematicVerify.Issue.WRONG_METADATA, WOOD_STAIRS) != null);
+			world.method_223(stairX, goldY, atZ, VERIFY_STAIRS_FACING);
+
+			// And the one the overlay has no way of drawing: a cell the schematic wants nothing in.
+			world.method_154(emptyX, goldY, emptyZ, COBBLESTONE, 0);
+			report = SchematicVerify.of(world, open, atX, atY, atZ);
+			check("a block standing where the schematic wants nothing is a fault too", report.getFaults(), 1);
+			SchematicVerify.Entry blocking = verifyRow(report, SchematicVerify.Issue.EXTRA, COBBLESTONE);
+			checkTrue("named for the block that is in the way", blocking != null);
+			if (blocking != null) {
+				check("counted once", blocking.getCount(), 1);
+				check("where it is standing", blocking.getExample().x, emptyX);
+			}
+
+			// And hung over the world's ceiling, where half of it has nowhere at all to be. What
+			// cannot be looked at is counted rather than guessed at: a cell with no world in it is
+			// not a cell that was found to match, and a report that folded the two together would be
+			// the most confident wrong answer this check could give.
+			open.offset.set(atX, MAX_WORLD_Y, atZ);
+			report = SchematicVerify.of(world, open, atX, MAX_WORLD_Y, atZ);
+			check("a schematic over the ceiling has the layer above it nowhere to be",
+					report.getOffWorld(), VERIFY_WIDTH * VERIFY_LENGTH);
+			check("only the layer still inside the world looked at",
+					report.getChecked(), VERIFY_WIDTH * VERIFY_LENGTH);
+			check("and nothing left over between the two",
+					report.getUnloaded() + report.getUnknown(), 0);
+			open.offset.set(atX, atY, atZ);
+
+			runVerifyScreenTests(mc, open, emptyX, goldY, emptyZ);
+		} finally {
+			for (int x = 0; x < VERIFY_WIDTH; x++) {
+				for (int y = 0; y < VERIFY_HEIGHT; y++) {
+					for (int z = 0; z < VERIFY_LENGTH; z++) {
+						world.method_201(atX + x, atY + y, atZ + z,
+								savedBlocks[x][y][z], savedMetadata[x][y][z]);
+					}
+				}
+			}
+			Schematica.CONFIG.pasteAir = savedPasteAir;
+			state.getActive().needsUpdate = true;
+		}
+
+		Log.info("SMOKETEST: --- verifying done ---");
+	}
+
+	/**
+	 * The screen over the top of it, and the button on the move screen that opens it.
+	 *
+	 * <p>Called with exactly one thing wrong in the world, and the cell that is wrong handed in so
+	 * that it can be put right while the screen is still open. That is the whole point of the button
+	 * on it: the list is a snapshot on purpose, so that it holds still while it is being read and
+	 * acted on, and Check again is what makes it a new one.
+	 */
+	private static void runVerifyScreenTests(Minecraft mc, OpenSchematic open, int x, int y, int z) {
+		Screen before = mc.currentScreen;
+
+		SchematicControlScreen control = new SchematicControlScreen();
+		mc.setScreen(control);
+		ButtonWidget verify = buttonNamed(control, Translations.get("schematic.verify"));
+		checkTrue("the move screen has a verify button on it", verify != null);
+		checkTrue("live, with a schematic open", verify != null && verify.active);
+
+		SchematicVerifyScreen screen = new SchematicVerifyScreen(control, open);
+		mc.setScreen(screen);
+		check("the verify screen opens on the one fault", screen.getReport().getFaults(), 1);
+		check("with one row for it", rowsOn(screen), 1);
+
+		// Put right while the screen is open, which changes nothing on it until it is asked again.
+		mc.world.method_154(x, y, z, 0, 0);
+		check("a list already on the screen holds still", screen.getReport().getFaults(), 1);
+
+		ButtonWidget recheck = buttonNamed(screen, Translations.get("schematic.verify.recheck"));
+		checkTrue("and there is a button to ask again", recheck != null);
+		if (recheck != null) {
+			clickButton(screen, recheck);
+			check("which reads the world back as it is now", screen.getReport().getFaults(), 0);
+			check("leaving no rows at all", rowsOn(screen), 0);
+		}
+
+		mc.setScreen(before);
+	}
+
+	/** How many rows a block list screen is showing, which is what a test looks at rather than pixels. */
+	private static int rowsOn(BlockListScreen screen) {
+		try {
+			java.lang.reflect.Method method = BlockListScreen.class.getDeclaredMethod("rowCount");
+			method.setAccessible(true);
+			return (Integer) method.invoke(screen);
+		} catch (ReflectiveOperationException exception) {
+			fail("could not count the rows on " + screen.getClass().getSimpleName(), exception);
+			return -1;
+		}
+	}
+
+	/** The one row of a report about a given block going wrong in a given way, or null for none. */
+	private static SchematicVerify.Entry verifyRow(SchematicVerify report,
+			SchematicVerify.Issue issue, int blockId) {
+		for (SchematicVerify.Entry entry : report.getEntries()) {
+			if (entry.getIssue() == issue && entry.getBlockId() == blockId) {
+				return entry;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Which of a block's metadata anybody chose, which is the table the verify check holds a world
+	 * up against a schematic through.
+	 *
+	 * <p>Both halves of it matter and they pull opposite ways. Too little masked away and a finished
+	 * build reports itself broken because a door was left open; too much and a stair turned the
+	 * wrong way goes unreported, which is the one thing the check exists to catch.
+	 */
+	private static void runPlacedMetadataTests() {
+		Log.info("SMOKETEST: --- what of a block's metadata anybody chose ---");
+
+		check("a stair keeps the way it was turned", BlockItems.placedMetadata(WOOD_STAIRS, 3), 3);
+		check("and wool keeps its colour", BlockItems.placedMetadata(WOOL, RED_WOOL), RED_WOOL);
+		check("a wire carrying power is the same wire",
+				BlockItems.placedMetadata(REDSTONE_WIRE, VERIFY_FULL_POWER), 0);
+		check("a door standing open is the same door",
+				BlockItems.placedMetadata(WOODEN_DOOR, DOOR_OPEN | 1), 1);
+		check("and the top half of one is still the top half",
+				BlockItems.placedMetadata(WOODEN_DOOR, DOOR_TOP | 2), DOOR_TOP | 2);
+		check("a lever thrown is the same lever", BlockItems.placedMetadata(LEVER, 8 | 3), 3);
+		check("leaves keep which tree they came off and drop the decay check",
+				BlockItems.placedMetadata(LEAVES, 8 | 1), 1);
+		check("a piston pushed out is the same piston",
+				BlockItems.placedMetadata(PISTON, EXTENDED | 2), 2);
+		check("and a crop is a crop however far along it is",
+				BlockItems.placedMetadata(WHEAT, 7), 0);
+
+		Log.info("SMOKETEST: --- metadata done ---");
 	}
 
 	/**
@@ -4816,6 +5139,132 @@ public final class SmokeTest {
 
 		mc.setScreen(new MaterialListScreen(null));
 		Log.info("SMOKETEST: scene " + scene + " - the material list, counted in stacks");
+	}
+
+	/**
+	 * The verify screen over a build with something of each kind wrong with it.
+	 *
+	 * <p>Builds the schematic, pastes it, and then takes it apart in four different ways, so that
+	 * one shot has every row the list can draw on it at once: blocks that were never placed, one
+	 * placed as the wrong block, two turned the wrong way, and a few standing where the schematic
+	 * wants nothing. Which is also what the shot is for - four kinds of row, four colours, and a
+	 * second line under each of them, are a layout rather than a number, and a screenshot is the
+	 * only thing here that can be looked at.
+	 *
+	 * <p>Every poke at the world goes through the raw setter, so that taking the floor out from
+	 * under a torch leaves the torch where it is: the point is a list of faults, and a build that
+	 * fell down while it was being damaged would be a different list every run.
+	 *
+	 * <p>The last scene of the run, and the only one that leaves blocks behind it. Nothing after it
+	 * reads that box - what follows is the log off and the check that the schematic was remembered,
+	 * which is about a note on disk rather than about the world.
+	 */
+	private static void setUpVerifyScene(Minecraft mc) {
+		SchematicaState state = Schematica.STATE;
+		if (mc.world == null) {
+			Log.info("SMOKETEST: no world, skipping the verify scene");
+			return;
+		}
+
+		int[][][] blocks = new int[VERIFY_SCENE_WIDTH][VERIFY_SCENE_HEIGHT][VERIFY_SCENE_LENGTH];
+		int[][][] metadata = new int[VERIFY_SCENE_WIDTH][VERIFY_SCENE_HEIGHT][VERIFY_SCENE_LENGTH];
+
+		for (int x = 0; x < VERIFY_SCENE_WIDTH; x++) {
+			for (int z = 0; z < VERIFY_SCENE_LENGTH; z++) {
+				blocks[x][0][z] = COBBLESTONE;
+			}
+			// A wall along the back of it, with a pair of torches standing on top.
+			blocks[x][1][0] = WOOL;
+			metadata[x][1][0] = RED_WOOL;
+		}
+		blocks[2][2][0] = TORCH;
+		metadata[2][2][0] = TORCH_ON_FLOOR;
+		blocks[5][2][0] = TORCH;
+		metadata[5][2][0] = TORCH_ON_FLOOR;
+
+		// Something plain enough to be obviously wrong when it is not there, and something whose
+		// whole point is which way round it is.
+		blocks[7][1][2] = GOLD;
+		blocks[7][1][3] = GOLD;
+		for (int x = 3; x <= 5; x++) {
+			blocks[x][1][2] = WOOD_STAIRS;
+			metadata[x][1][2] = VERIFY_STAIRS_FACING;
+		}
+
+		File file = new File(state.getSchematicDirectory(), VERIFY_FILE);
+		try {
+			SchematicFormat.write(file, new Schematic(blocks, metadata, new ArrayList<>(),
+					VERIFY_SCENE_WIDTH, VERIFY_SCENE_HEIGHT, VERIFY_SCENE_LENGTH));
+		} catch (IOException exception) {
+			fail("could not write the schematic for the verify scene", exception);
+			return;
+		}
+
+		state.closeAll();
+		if (!state.openSchematic(file)) {
+			fail("openSchematic returned false setting up the verify scene", null);
+			return;
+		}
+
+		int atX = baseX;
+		int atY = baseY + PASTE_TEST_HEIGHT;
+		int atZ = baseZ;
+
+		OpenSchematic open = state.getActive();
+		open.offset.set(atX, atY, atZ);
+		open.isRenderingSchematic = true;
+		open.needsUpdate = true;
+
+		// Cleared before it is built, so what is in the box afterwards is this schematic and the
+		// damage below rather than whatever the terrain happened to have up here.
+		for (int x = 0; x < VERIFY_SCENE_WIDTH; x++) {
+			for (int y = 0; y < VERIFY_SCENE_HEIGHT; y++) {
+				for (int z = 0; z < VERIFY_SCENE_LENGTH; z++) {
+					mc.world.method_154(atX + x, atY + y, atZ + z, 0, 0);
+				}
+			}
+		}
+		SchematicPaste.write(mc.world, open);
+
+		// Never placed: six of the floor, three of the wall, and one of the two torches.
+		for (int x = 1; x <= 6; x++) {
+			mc.world.method_154(atX + x, atY, atZ + 4, 0, 0);
+		}
+		mc.world.method_154(atX, atY + 1, atZ, 0, 0);
+		mc.world.method_154(atX + 1, atY + 1, atZ, 0, 0);
+		mc.world.method_154(atX + 7, atY + 1, atZ, 0, 0);
+		mc.world.method_154(atX + 5, atY + 2, atZ, 0, 0);
+
+		// Placed, wrongly: one gold block that is cobblestone, and two stairs facing the other way.
+		mc.world.method_154(atX + 7, atY + 1, atZ + 2, COBBLESTONE, 0);
+		mc.world.method_223(atX + 3, atY + 1, atZ + 2, VERIFY_STAIRS_TURNED);
+		mc.world.method_223(atX + 4, atY + 1, atZ + 2, VERIFY_STAIRS_TURNED);
+
+		// And standing where the schematic wants nothing at all, which is the fault the overlay has
+		// no way of drawing.
+		mc.world.method_154(atX + 1, atY + 1, atZ + 2, STONE, 0);
+		mc.world.method_154(atX + 1, atY + 1, atZ + 3, STONE, 0);
+		mc.world.method_154(atX + 2, atY + 1, atZ + 3, STONE, 0);
+		mc.world.method_154(atX + 6, atY + 1, atZ + 3, STONE, 0);
+
+		parkCamera(mc);
+
+		SchematicVerifyScreen screen = new SchematicVerifyScreen(null, open);
+		mc.setScreen(screen);
+
+		SchematicVerify report = screen.getReport();
+		check("the damaged build is six kinds of wrong", report.getEntries().size(), 6);
+		check("ten blocks of it were never placed",
+				report.getCount(SchematicVerify.Issue.MISSING), 10);
+		check("one is the wrong block", report.getCount(SchematicVerify.Issue.WRONG_BLOCK), 1);
+		check("two are turned the wrong way",
+				report.getCount(SchematicVerify.Issue.WRONG_METADATA), 2);
+		check("and four are in the way of the rest",
+				report.getCount(SchematicVerify.Issue.EXTRA), 4);
+		check("with nothing at all left unchecked",
+				report.getUnloaded() + report.getOffWorld() + report.getUnknown(), 0);
+
+		Log.info("SMOKETEST: scene " + scene + " - the verify screen, one row of each kind");
 	}
 
 	/**

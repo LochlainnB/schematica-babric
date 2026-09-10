@@ -74,6 +74,7 @@ public class SchematicControlScreen extends AxisScreen {
 	private ButtonWidget btnRotate;
 	private ButtonWidget btnEasyPlace;
 	private ButtonWidget btnPaste;
+	private ButtonWidget btnVerify;
 	private ButtonWidget btnReplace;
 	private ButtonWidget btnMaterials;
 	private ButtonWidget btnSettings;
@@ -118,6 +119,12 @@ public class SchematicControlScreen extends AxisScreen {
 		this.btnMirror = this.addButton(id++, this.width - 90, this.height - 55, 80, 20, Translations.get("schematic.flip"));
 		this.btnRotate = this.addButton(id++, this.width - 90, this.height - 30, 80, 20, Translations.get("schematic.rotate"));
 
+		// Reading the world back against the schematic, which is the one thing in this column that
+		// changes nothing at all - not the file, not the ghost, not the world. It sits at the top of
+		// the column rather than beside Materials, where it belongs by subject, because putting it
+		// there would move every button under it and this column is one people already know.
+		this.btnVerify = this.addButton(id++, 10, this.height - 155, 100, 20, Translations.get("schematic.verify"));
+
 		// Changing what the schematic is made of, rather than where it stands - the one thing on this
 		// screen that is about the file and not about the ghost.
 		this.btnReplace = this.addButton(id++, 10, this.height - 130, 100, 20, Translations.get("schematic.replace"));
@@ -144,6 +151,7 @@ public class SchematicControlScreen extends AxisScreen {
 		this.btnMirror.active = hasSchematic;
 		this.btnRotate.active = hasSchematic;
 		this.btnMaterials.active = hasSchematic;
+		this.btnVerify.active = hasSchematic;
 		this.btnReplace.active = hasSchematic;
 		// Paste, Open and Close are left to render(), which settles them every frame: what they turn
 		// on is a creative mode and a set of open schematics this screen does not own and cannot hear
@@ -188,6 +196,8 @@ public class SchematicControlScreen extends AxisScreen {
 			active.rotateSchematic();
 		} else if (button == this.btnPaste) {
 			this.paste();
+		} else if (button == this.btnVerify) {
+			this.minecraft.setScreen(new SchematicVerifyScreen(this, active));
 		} else if (button == this.btnReplace) {
 			this.minecraft.setScreen(new BlockReplaceScreen(this, active));
 		} else if (button == this.btnMaterials) {

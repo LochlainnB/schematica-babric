@@ -202,6 +202,65 @@ public final class BlockItems {
 	}
 
 	/**
+	 * The metadata a block carries that anybody chose, with whatever the game does to it on its own
+	 * masked away.
+	 *
+	 * <p>{@link #placedForm} one level in. That one answers which of a pair of block ids the game
+	 * switches between is the one somebody put down; this answers the same question about the bits
+	 * inside a single id, and for the same reason - a wire is a wire whether or not a lever
+	 * somewhere is throwing power along it, and a door is the same door standing open.
+	 *
+	 * <p>Only the exceptions are listed, because metadata is mostly a record of what was chosen
+	 * when the block went down: which way a stair turns, what colour the wool is, how long a
+	 * repeater waits. What is below is the rest of it - a growth counter, a power level, a decay
+	 * check, an open door, a pressed button - none of which is anything about a build.
+	 *
+	 * <p>Nothing writes through this. It is for holding a world up against a schematic, where the
+	 * question is whether the two match rather than what to put down, and the difference between
+	 * those two questions is a list of faults made mostly of doors somebody had left open.
+	 */
+	private static final int[][] PLACED_METADATA = {
+			{  6, 0x3 },  // sapling: the high bits are how close it is to being a tree
+			{  8, 0x0 },  // flowing water: how far it has run, and whether it is falling
+			{  9, 0x0 },  // still water
+			{ 10, 0x0 },  // flowing lava
+			{ 11, 0x0 },  // still lava
+			{ 18, 0x3 },  // leaves: 0x4 and 0x8 are the decay check, not which tree it came off
+			{ 26, 0xB },  // bed: 0x4 is somebody asleep in it
+			{ 27, 0x7 },  // powered rail: 0x8 is whether it is powered
+			{ 28, 0x7 },  // detector rail: 0x8 is whether a cart is on it
+			{ 29, 0x7 },  // sticky piston: 0x8 is whether it is pushed out
+			{ 33, 0x7 },  // piston
+			{ 51, 0x0 },  // fire: how long it has been burning
+			{ 55, 0x0 },  // redstone wire: how much power it is carrying
+			{ 59, 0x0 },  // wheat: how grown it is
+			{ 60, 0x0 },  // farmland: how wet it is
+			{ 64, 0xB },  // wooden door: 0x4 is whether it is open
+			{ 69, 0x7 },  // lever: 0x8 is whether it is thrown
+			{ 70, 0x0 },  // stone pressure plate: 0x1 is somebody standing on it
+			{ 71, 0xB },  // iron door
+			{ 72, 0x0 },  // wooden pressure plate
+			{ 77, 0x7 },  // button: 0x8 is whether it is pressed
+			{ 81, 0x0 },  // cactus: how tall it has grown
+			{ 83, 0x0 },  // sugar cane
+			{ 92, 0x0 },  // cake: how much of it is left
+			{ 96, 0x3 },  // trapdoor: 0x4 is whether it is open
+	};
+
+	/**
+	 * The part of a block's metadata that says something about the build, which for everything but
+	 * the blocks in {@link #PLACED_METADATA} is the whole of it.
+	 */
+	public static int placedMetadata(int blockId, int metadata) {
+		for (int[] pair : PLACED_METADATA) {
+			if (pair[0] == blockId) {
+				return metadata & pair[1];
+			}
+		}
+		return metadata & 0xF;
+	}
+
+	/**
 	 * Whether anything at all puts this block down, as against the game making it: the head of an
 	 * extended piston comes out of the piston, fire is lit, a portal is struck.
 	 *
