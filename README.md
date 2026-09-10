@@ -505,6 +505,15 @@ Water and lava are compared as the substance rather than as the flow. A pool sav
 and the same pool in the world will not agree about which cells of it are running, and a report
 saying "wrong block: water, found water" would be telling the truth uselessly.
 
+A block nobody places is read as an empty cell wherever it turns up, on either side of the
+comparison. The head of an extended piston comes out of the piston, fire is lit, a portal is struck,
+and the block a piston is halfway through pushing is a moment rather than a thing - none of them is
+something to go and do or to undo, which is the same answer the replace screen gives when it leaves
+them off the list of what a schematic is made of. So an extended piston that has not been built yet
+is one thing to go and place rather than two, and an arm the circuit has pushed out into a cell the
+schematic wants nothing in is no more a fault than the piston being out is. A block that somebody
+really did put where the arm goes is still reported, as a block in the way, which is what it is.
+
 Two kinds of cell are not judged at all, and are counted under the list rather than folded into it,
 because a cell that was not checked is not a cell that was found to be right. One is a cell wanting a
 block this version of the game does not have, which is a schematic written by a later one. The other
@@ -916,6 +925,14 @@ list of nothing but them. Which of a block's metadata anybody chose is then chec
 own, both halves of it: a stair keeps its facing and wool its colour, while an open door, a thrown
 lever, a pushed piston, a decaying leaf and a growing crop each come back as the block somebody put
 there.
+
+The piston gets a schematic and a box of its own, being the one thing in the game a schematic holds
+two blocks of and a player places one of. An extended piston that has not been built yet has to come
+back as one thing to go and find with no row at all for the arm, and pasted - held out by a torch
+that goes in with it, since a piston pulling itself in spends the next couple of ticks as a block
+halfway through moving - it has to come back with nothing wrong at all. Then an arm is stood in a
+cell the schematic wants nothing in and checked not to be in the way of anything, and a cobblestone
+in the same cell checked to be.
 
 The screen is opened over a world with exactly one thing wrong in it, and that one thing is put right
 while the screen is still up: the list has to be unchanged until **Check again** is clicked, which is

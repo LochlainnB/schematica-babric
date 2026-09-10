@@ -139,6 +139,10 @@ public final class SmokeTest {
 	private static final int VERIFY_WIDTH = 5;
 	private static final int VERIFY_HEIGHT = 2;
 	private static final int VERIFY_LENGTH = 4;
+	/** The one the piston checks build: a floor, a piston held out by a torch, and its arm. */
+	private static final int PISTON_VERIFY_WIDTH = 4;
+	private static final int PISTON_VERIFY_HEIGHT = 3;
+	private static final int PISTON_VERIFY_LENGTH = 3;
 	/** The larger one the verify scene builds, damages, and shoots the report of. */
 	private static final String VERIFY_FILE = "smoketest-verify-scene.schematic";
 	private static final int VERIFY_SCENE_WIDTH = 8;
@@ -406,6 +410,7 @@ public final class SmokeTest {
 				runWallTorchTests(mc);
 				runPistonTests(mc);
 				runVerifyTests(mc);
+				runVerifyPistonTests(mc);
 				loadAndTransform(mc);
 				phase = Phase.SHOOT;
 				ticks = 0;
@@ -3576,8 +3581,8 @@ public final class SmokeTest {
 			// the most confident wrong answer this check could give.
 			open.offset.set(atX, MAX_WORLD_Y, atZ);
 			report = SchematicVerify.of(world, open, atX, MAX_WORLD_Y, atZ);
-			check("a schematic over the ceiling has the layer above it nowhere to be",
-					report.getOffWorld(), VERIFY_WIDTH * VERIFY_LENGTH);
+			check("a schematic over the ceiling has everything above that layer nowhere to be",
+					report.getOffWorld(), VERIFY_WIDTH * VERIFY_LENGTH * (VERIFY_HEIGHT - 1));
 			check("only the layer still inside the world looked at",
 					report.getChecked(), VERIFY_WIDTH * VERIFY_LENGTH);
 			check("and nothing left over between the two",
@@ -3599,6 +3604,138 @@ public final class SmokeTest {
 		}
 
 		Log.info("SMOKETEST: --- verifying done ---");
+	}
+
+	/**
+	 * The piston, which is the one thing in the game a schematic holds two blocks of and a player
+	 * places one of.
+	 *
+	 * <p>An extended piston that has not been built yet used to come back as two things to go and
+	 * find: the piston, and the arm on the end of it. Nobody has ever placed an arm - it comes out
+	 * of the piston when the circuit tells it to - so the second row was one nothing could be done
+	 * about, and it counted the build as one block further from finished than it was.
+	 *
+	 * <p>A schematic of its own, on its own box, for two reasons. Everything here turns on what
+	 * happens to a piston as it lands, which is worth keeping away from the rest of the checks; and
+	 * the arm is held out by a torch rather than left to fall in, since a piston pulling itself in
+	 * spends the next couple of ticks as a block halfway through moving and nothing about a machine
+	 * caught mid-stride is a fixed thing to assert against.
+	 */
+	private static void runVerifyPistonTests(Minecraft mc) {
+		Log.info("SMOKETEST: --- verifying a piston that is out ---");
+		SchematicaState state = Schematica.STATE;
+		World world = mc.world;
+
+		int[][][] blocks = new int[PISTON_VERIFY_WIDTH][PISTON_VERIFY_HEIGHT][PISTON_VERIFY_LENGTH];
+		int[][][] metadata = new int[PISTON_VERIFY_WIDTH][PISTON_VERIFY_HEIGHT][PISTON_VERIFY_LENGTH];
+
+		for (int x = 0; x < PISTON_VERIFY_WIDTH; x++) {
+			for (int z = 0; z < PISTON_VERIFY_LENGTH; z++) {
+				blocks[x][0][z] = COBBLESTONE;
+			}
+		}
+
+		// A piston pointing up with its arm above it, and the torch beside it that keeps it there.
+		blocks[1][1][1] = PISTON;
+		metadata[1][1][1] = EXTENDED + SIDE_UP;
+		blocks[1][2][1] = PISTON_HEAD;
+		metadata[1][2][1] = SIDE_UP;
+		blocks[1][1][2] = REDSTONE_TORCH;
+		metadata[1][1][2] = TORCH_ON_FLOOR;
+
+		// The floor, the piston and the torch. Not the arm.
+		int wanted = PISTON_VERIFY_WIDTH * PISTON_VERIFY_LENGTH + 2;
+
+		File file = new File(state.getSchematicDirectory(), "smoketest-verify-piston.schematic");
+		try {
+			SchematicFormat.write(file, new Schematic(blocks, metadata, new ArrayList<>(),
+					PISTON_VERIFY_WIDTH, PISTON_VERIFY_HEIGHT, PISTON_VERIFY_LENGTH));
+		} catch (java.io.IOException exception) {
+			fail("could not write the piston verify schematic", exception);
+			return;
+		}
+		if (!state.loadSchematic(file)) {
+			fail("loadSchematic returned false for the piston verify schematic", null);
+			return;
+		}
+
+		int atX = baseX;
+		int atY = baseY + PASTE_TEST_HEIGHT;
+		int atZ = baseZ;
+
+		int[][][] savedBlocks = new int[PISTON_VERIFY_WIDTH][PISTON_VERIFY_HEIGHT][PISTON_VERIFY_LENGTH];
+		int[][][] savedMetadata = new int[PISTON_VERIFY_WIDTH][PISTON_VERIFY_HEIGHT][PISTON_VERIFY_LENGTH];
+		for (int x = 0; x < PISTON_VERIFY_WIDTH; x++) {
+			for (int y = 0; y < PISTON_VERIFY_HEIGHT; y++) {
+				for (int z = 0; z < PISTON_VERIFY_LENGTH; z++) {
+					savedBlocks[x][y][z] = world.getBlockId(atX + x, atY + y, atZ + z);
+					savedMetadata[x][y][z] = world.method_1778(atX + x, atY + y, atZ + z);
+					world.method_154(atX + x, atY + y, atZ + z, 0, 0);
+				}
+			}
+		}
+
+		boolean savedPasteAir = Schematica.CONFIG.pasteAir;
+		OpenSchematic open = state.getActive();
+
+		try {
+			open.offset.set(atX, atY, atZ);
+
+			// Nothing built yet, which is where the fault was reported from.
+			SchematicVerify report = SchematicVerify.of(world, open, atX, atY, atZ);
+			check("an extended piston nobody has built yet is one thing to go and place",
+					report.getFaults(), wanted);
+			SchematicVerify.Entry piston = verifyRow(report, SchematicVerify.Issue.MISSING, PISTON);
+			checkTrue("the piston has a row", piston != null);
+			if (piston != null) {
+				check("counted once", piston.getCount(), 1);
+			}
+			checkTrue("and the arm it brings with it has none",
+					verifyRow(report, SchematicVerify.Issue.MISSING, PISTON_HEAD) == null);
+
+			// Built, and still out, since the torch that holds it out went in with it.
+			Schematica.CONFIG.pasteAir = true;
+			SchematicPaste.write(world, state);
+			check("pasted, the piston is a piston", world.getBlockId(atX + 1, atY + 1, atZ + 1), PISTON);
+			check("still out", world.method_1778(atX + 1, atY + 1, atZ + 1), EXTENDED + SIDE_UP);
+			check("with its arm on the end of it",
+					world.getBlockId(atX + 1, atY + 2, atZ + 1), PISTON_HEAD);
+
+			report = SchematicVerify.of(world, open, atX, atY, atZ);
+			check("and nothing at all is wrong with it", report.getFaults(), 0);
+
+			// An arm somewhere the schematic wants nothing, with no piston behind it to be broken by
+			// putting it there. The circuit's doing rather than the builder's, and no more a fault
+			// than the piston being out is.
+			world.method_154(atX + 3, atY + 1, atZ, PISTON_HEAD, SIDE_UP);
+			report = SchematicVerify.of(world, open, atX, atY, atZ);
+			check("an arm where the schematic wants nothing is not in the way of anything",
+					report.getFaults(), 0);
+			world.method_154(atX + 3, atY + 1, atZ, 0, 0);
+
+			// But a block somebody really did put there is, wherever it is standing.
+			world.method_154(atX + 3, atY + 1, atZ, COBBLESTONE, 0);
+			report = SchematicVerify.of(world, open, atX, atY, atZ);
+			check("while a block somebody put there is", report.getFaults(), 1);
+			checkTrue("named as the block in the way",
+					verifyRow(report, SchematicVerify.Issue.EXTRA, COBBLESTONE) != null);
+		} finally {
+			// The arm goes first and by itself: taking a piston out from under one leaves an arm
+			// that breaks the piston again on the way out, and the box is being emptied either way.
+			world.method_154(atX + 1, atY + 2, atZ + 1, 0, 0);
+			for (int x = 0; x < PISTON_VERIFY_WIDTH; x++) {
+				for (int y = 0; y < PISTON_VERIFY_HEIGHT; y++) {
+					for (int z = 0; z < PISTON_VERIFY_LENGTH; z++) {
+						world.method_201(atX + x, atY + y, atZ + z,
+								savedBlocks[x][y][z], savedMetadata[x][y][z]);
+					}
+				}
+			}
+			Schematica.CONFIG.pasteAir = savedPasteAir;
+			state.getActive().needsUpdate = true;
+		}
+
+		Log.info("SMOKETEST: --- verifying a piston done ---");
 	}
 
 	/**

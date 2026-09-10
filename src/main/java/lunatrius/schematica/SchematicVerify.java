@@ -41,6 +41,9 @@ import net.minecraft.world.World;
  * before the two are held against each other. Without that a finished build reports itself broken
  * the moment a door is opened, a lever is thrown or a wire carries power - which is a list nobody
  * would read twice.
+ *
+ * <p>By the same rule a block nobody puts down is read as an empty cell wherever it turns up, so
+ * that an extended piston is one thing to go and place rather than two - see {@link #settled}.
  */
 public final class SchematicVerify {
 	/** The world's ceiling. A schematic hanging over it has nothing to be checked against up there. */
@@ -349,22 +352,40 @@ public final class SchematicVerify {
 	}
 
 	/**
-	 * The form of a block to compare as: the one somebody would have put down.
+	 * The form of a block to compare as: the one somebody would have put down, or nothing at all
+	 * where nobody would have put anything.
 	 *
-	 * <p>{@link BlockItems#placedForm} for the pairs the game switches between - a lit furnace is a
-	 * furnace - and the still form for the two liquids, which are less a pair the game switches
-	 * between than one substance it keeps two ids for. A pool saved into a schematic and the same
-	 * pool in the world will not agree about which cells of it are running, and a report saying
-	 * "wrong block: water, found water" would be telling the truth uselessly.
+	 * <p>A block no player places is read as an empty cell on whichever side of the comparison it
+	 * turns up. The head of an extended piston comes out of the piston, fire is lit, a portal is
+	 * struck, and the block a piston is halfway through pushing is a moment rather than a thing -
+	 * so none of them is anything to do or to undo, which is the same answer {@link BlockPalette}
+	 * gives when it leaves them off the list of what a schematic is made of.
+	 *
+	 * <p>That is what stops an extended piston being reported as two things missing. A schematic
+	 * holding one holds a piston and an arm, and the arm is not a second block to go and find: place
+	 * the piston, power it, and the arm is there. Read as empty it also answers the other three
+	 * ways round. An arm standing where the schematic wants nothing is the circuit having pushed it
+	 * out, which is no more a fault than the piston being out is - and both are already tolerated,
+	 * the piston by {@link BlockItems#placedMetadata} masking the bit that says so. A block standing
+	 * where the arm should be is still reported, as a block in the way, which is exactly what it is.
+	 *
+	 * <p>Otherwise {@link BlockItems#placedForm} for the pairs the game switches between - a lit
+	 * furnace is a furnace - and the still form for the two liquids, which are less a pair the game
+	 * switches between than one substance it keeps two ids for. A pool saved into a schematic and
+	 * the same pool in the world will not agree about which cells of it are running, and a report
+	 * saying "wrong block: water, found water" would be telling the truth uselessly.
 	 */
 	private static int settled(int blockId) {
+		if (blockId == 0 || !BlockItems.isPlaceable(blockId)) {
+			return 0;
+		}
 		if (blockId == FLOWING_WATER) {
 			return STILL_WATER;
 		}
 		if (blockId == FLOWING_LAVA) {
 			return STILL_LAVA;
 		}
-		return blockId == 0 ? 0 : BlockItems.placedForm(blockId);
+		return BlockItems.placedForm(blockId);
 	}
 
 	public List<Entry> getEntries() {
