@@ -147,6 +147,16 @@ processResources {
 	}
 }
 
+// MIT asks that the notice travels with the code, and a jar handed to somebody
+// is a copy of the code, so LICENSE goes inside it. The name is suffixed on the
+// way in because a loader that unpacks mods side by side would otherwise have
+// several files all called LICENSE and no way to tell whose is whose.
+jar {
+	from('LICENSE') {
+		rename { "${it}_${base.archivesName.get()}" }
+	}
+}
+
 tasks.withType(JavaCompile).configureEach {
 	it.options.encoding = 'UTF-8'
 	it.options.release = 17

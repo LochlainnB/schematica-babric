@@ -1044,5 +1044,11 @@ block in `build.gradle` if you do not want it.
 
 ## Credit
 
-Original mod by **Lunatrius**. This is a port; no license was distributed with the b1.7.3 release
-that was converted, so check with the author before redistributing.
+Original mod by **Lunatrius** - Jadran Kotnik - under the MIT license, which is what this port is
+under too. [LICENSE](LICENSE) keeps his copyright notice and adds one for the port, which is what
+that license asks of anybody who passes the code on. Everything the port added is offered on the
+same terms.
+
+`libs/modmenu-1.8.5-beta.11.jar` is somebody else's build of somebody else's mod, checked in only so
+the dev run has Mod Menu to talk to. It is under its own terms rather than the ones above, and it
+never goes into the jar this repository builds.
