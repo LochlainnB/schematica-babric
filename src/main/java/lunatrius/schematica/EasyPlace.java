@@ -91,6 +91,11 @@ public final class EasyPlace {
 	 * for must not go on to make a second one.
 	 */
 	public static boolean interceptUse(Minecraft mc) {
+		// Opening a chest mid-exchange would close the player container and drop its server cursor.
+		// This protection lasts until the swap settles, even if easy place has since been turned off.
+		if (HotbarRestock.isCursorSwapPending()) {
+			return true;
+		}
 		if (!isEngaged()) {
 			return false;
 		}

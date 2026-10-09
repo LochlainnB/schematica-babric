@@ -368,17 +368,20 @@ or anything else that is not a block, and never what is in your hand. A block th
 nowhere goes first, since it is left over from something else. If the bar has nothing to spare,
 nothing is taken and nothing is built - your hotbar is left as you arranged it.
 
-The move is made with shift clicks, which pass a stack between the bar and the pack **without it
-ever going through the cursor**. That is the whole reason for the choice. The obvious sequence -
-pick the stack up, put it down on the bar, put the displaced one back - leaves a stack on the cursor
-between clicks, and a cursor still holding something is dropped on the floor the moment any
-container closes. Shift clicks have no such half-finished state, so a click a server turns down is a
-click that did nothing.
+An empty hotbar slot is filled with a shift click. When the bar is full, the wanted stack is swapped
+with the spare block instead, putting that block into the slot the wanted one came from. This works
+even with a completely full inventory, where shift-clicking a block off the bar has nowhere to put
+it. The three clicks making the swap all run in one tick and leave the cursor empty; if the cursor
+already holds something, the move is left alone.
 
 On a server the move is a request rather than a fact, so easy place places nothing until the server
 has answered it: what is in hand is not settled until then. Beta's client keeps no note of which
-clicks are outstanding, so the mod reads the server's answers off the wire itself. A refusal costs a
-round trip and a retry, never an item.
+clicks are outstanding, so the mod matches the server's answers to its own transaction numbers.
+Inventory opening and right clicks wait while an exchange is unresolved, so opening a chest cannot
+drop a stack the server is still holding on the cursor. A refused exchange waits for the server's
+inventory and cursor updates, puts any stranded stack back into the source slot, and confirms that
+cleanup before allowing another move. If a newly picked-up item has filled that slot and there is
+nowhere else to put the stack, a chat message asks you to put it away in your inventory instead.
 
 ### Pasting it into the world
 
@@ -782,6 +785,9 @@ checked separately, so a rule that stopped working would be named rather than ju
 
 Bringing a block onto the hotbar is checked the same way, including which slot is given up for it:
 never a tool, never what is in hand, and a block this schematic uses nowhere before one it needs.
+The inventory is then filled completely, with differently sized stacks to swap, and the fetched
+block's colour, both counts, the displaced block's slot and the empty cursor are checked. A cursor
+already holding a stack is checked to keep it without either inventory slot changing.
 
 Placing in mid air is checked end to end rather than by asking: the player is stood three blocks west
 of a gap with everything between them cleared out, and each click goes through the client's own
@@ -1004,10 +1010,16 @@ making a world, and checks easy place against it. This is the only way to exerci
 inventory swap that exists on a server and nowhere else - the asking, and the being answered - since
 in single player a slot click is applied on the spot. It checks that the swap goes out and waits,
 that the server takes it, that the block is still on the hotbar once it has, and that the block then
-placed is still there a couple of seconds later rather than taken back off the player. Any swap the
-server turns down fails the run. `scratchpad/mptest.sh` in the session's temp directory starts the
-server, joins with the dev client and hands out the items; the server jar is the vanilla one from
-the loom cache and runs on a modern JDK.
+placed is still there a couple of seconds later rather than taken back off the player. Give the
+test player 35 full stacks of cobblestone and one full stack of gold blocks, filling every inventory
+slot, and operator privileges so spawn protection does not reject the placements. The server jar
+is the vanilla one from the loom cache and runs on a modern JDK.
+
+Then each of the three exchange clicks is deliberately reported with the wrong result, forcing a
+real server refusal and resync rather than simulating one on the client. A fourth case refuses the
+cleanup click too. Each case must settle with exactly the same stacks, an empty cursor, and the
+held slot untouched. An unrelated transaction must not confirm it, and opening the inventory or
+turning easy place off must not interrupt its cursor protection.
 
 The mid-air placement is checked there too, and for the same reason: whether a server accepts a click
 on a position that holds nothing at all is not something reading the client can settle. The player

@@ -50,10 +50,12 @@ import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.SignBlockEntity;
 import net.minecraft.class_260;
 import net.minecraft.class_27;
+import net.minecraft.class_363;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screen.ConnectScreen;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.TitleScreen;
+import net.minecraft.client.gui.screen.container.ContainerScreen;
 import net.minecraft.client.gui.screen.option.KeybindsScreen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.network.ClientNetworkHandler;
@@ -236,8 +238,11 @@ public final class SmokeTest {
 	private static final int STACK_SCENE_WOOL = 64;
 	private static final int STACK_SCENE_TORCH = 20;
 
-	/** Nine blocks to fill the bar plus the gold, which is what the server is asked to hand out. */
-	private static final int TEST_STACKS = 10;
+	/**
+	 * Thirty-five stacks of cobblestone plus one of gold, which is what the server is asked to hand
+	 * out: every one of the 36 inventory slots full, so no shift click can make room anywhere.
+	 */
+	private static final int TEST_STACKS = 36;
 	/** Where the hotbar starts in the player container. */
 	private static final int HOTBAR_FIRST_SLOT = 36;
 
@@ -1166,8 +1171,13 @@ public final class SmokeTest {
 	 *
 	 * <p>Written as steps rather than as one method because most of it is waiting - for the items
 	 * the server hands out, for it to answer a swap, and for it to take back a block it did not like.
-	 * The server is expected to have been told to give the player a full hotbar of cobblestone and
-	 * then the gold, which is what puts the gold out of reach in the inventory proper.
+	 * The server is expected to have been told to give the player 35 stacks of cobblestone and one
+	 * of gold, filling all 36 slots: the gold out of reach in the inventory proper, and nowhere free
+	 * for a shift click to put anything.
+	 *
+	 * <p>After the ordinary placements, the swap is run again with one of its own clicks reported
+	 * wrongly to the server, so a real server applies it, refuses it and resyncs - see
+	 * {@link #onRestockClick}.
 	 */
 	private static void runMultiplayerTests(Minecraft mc) {
 		if (mc.player == null) {
@@ -1320,7 +1330,7 @@ public final class SmokeTest {
 				nextStep(9);
 				return;
 
-			default:
+			case 9:
 				// The same wait again: a placement the server threw out comes back as a block update
 				// putting the air back, so a block still standing here is one the server agreed to.
 				if (ticks < 40) {
@@ -1330,10 +1340,293 @@ public final class SmokeTest {
 						mc.world.getBlockId(airX, airY, airZ), GOLD);
 				check("no swap was turned down anywhere along the way", HotbarRestock.getRefusals(), 0);
 				Log.info("SMOKETEST: --- easy place on a server done ---");
+				Log.info("SMOKETEST: --- refused restock clicks on a server ---");
+				refusalCase = 0;
+				nextStep(10);
+				return;
+
+			case 10:
+				setUpRefusalCase(mc);
+				nextStep(11);
+				return;
+
+			case 11:
+				// Let the server agree with the setup exchange before anything is tested on top of it.
+				if (ticks < 20) {
+					return;
+				}
+				if (!startRefusalCase(mc)) {
+					finish(mc);
+					return;
+				}
+				nextStep(12);
+				return;
+
+			case 12:
+				// A refusal is a round trip, a resync and possibly a cleanup click and its answer.
+				if (HotbarRestock.isBusy()) {
+					if (ticks > 20 * 15) {
+						fail(refusalLabel() + ": the restock never settled - refusals "
+								+ HotbarRestock.getRefusals() + ", clicks " + restockClicks
+								+ ", cursor " + describeStack(mc.player.inventory.getCursorStack())
+								+ ", inventory " + describe(mc.player.inventory), null);
+						faultInjection = false;
+						HotbarRestock.reset();
+						finish(mc);
+					}
+					return;
+				}
+				Log.info("SMOKETEST: " + refusalLabel() + " settled after " + ticks + " ticks");
+				nextStep(13);
+				return;
+
+			case 13:
+				// Anything the server still had to say about it has arrived by now.
+				if (ticks < 20) {
+					return;
+				}
+				checkRefusalCase(mc);
+				faultInjection = false;
+				refusalCase++;
+				if (refusalCase < REFUSAL_CASES.length) {
+					nextStep(10);
+					return;
+				}
+				Log.info("SMOKETEST: --- refused restock clicks on a server done ---");
 
 				runServerRestoreTests(mc);
 				finish(mc);
+				return;
+
+			default:
+				fail("the server test ran off the end at step " + serverStep, null);
+				finish(mc);
 		}
+	}
+
+	// --- refused restock clicks --------------------------------------------------------------
+
+	/**
+	 * Which of the restock's own outgoing clicks are reported wrongly, as bits by click number, with
+	 * the refusals and clicks that should follow. Clicks 1 to 3 are the exchange - source, victim,
+	 * source - and click 4 is the cleanup that puts a stranded cursor stack back after a resync.
+	 *
+	 * <p>A refused click 1 leaves the gold on the server's cursor; clicks 2 and 3 then reach a
+	 * server that ignores everything until the refusal is acknowledged, so the resync shows the
+	 * source empty and the gold in hand, and the cleanup puts it back. A refused click 2 strands the
+	 * displaced cobblestone on the cursor the same way. A refused click 3 has already finished the
+	 * exchange, so the resync leaves nothing to clean up. A refused cleanup has still put the stack
+	 * away on the server, and the second resync says so.
+	 */
+	private static final int[][] REFUSAL_CASES = {
+			// mask, refusals, clicks
+			{1 << 1, 1, 4},
+			{1 << 2, 1, 4},
+			{1 << 3, 1, 3},
+			{(1 << 1) | (1 << 4), 2, 4},
+	};
+	private static final String[] REFUSAL_NAMES = {
+			"click 1 refused",
+			"click 2 refused",
+			"click 3 refused",
+			"click 1 and its cleanup refused",
+	};
+
+	private static int refusalCase = 0;
+	/** Only ever set by the server test, and only around one refusal case at a time. */
+	private static boolean faultInjection = false;
+	private static int faultMask = 0;
+	private static int restockClicks = 0;
+	private static int faultsInjected = 0;
+
+	private static int caseSource;
+	private static int caseSelected;
+	private static int caseSelectedItem;
+	private static int caseSelectedCount;
+	private static int caseGold;
+	private static int caseCobblestone;
+	private static int caseGoldStack;
+	private static List<String> caseStacks;
+
+	/**
+	 * Called by {@code HotbarRestock} as each of its own clicks goes out, and for no other click.
+	 * Does nothing at all unless the server test has asked for a fault. Then it changes nothing but
+	 * the click result the packet reports, so the real server still applies the click, finds it
+	 * disagrees with what the client says happened, refuses it and resyncs the whole inventory.
+	 */
+	public static void onRestockClick(class_363 packet) {
+		if (!ENABLED || !faultInjection) {
+			return;
+		}
+
+		restockClicks++;
+		if (restockClicks < 31 && (faultMask & (1 << restockClicks)) != 0) {
+			ItemStack reported = packet.field_1366;
+			// Something no slot in this test ever holds, so it can never match by accident.
+			packet.field_1366 = reported != null && reported.itemId == GLASS
+					? new ItemStack(STONE, 1, 0) : new ItemStack(GLASS, 1, 0);
+			faultsInjected++;
+			Log.info("SMOKETEST: reporting restock click " + restockClicks + " (action "
+					+ packet.field_1365 + ", slot " + packet.field_1363 + ") wrongly as "
+					+ describeStack(packet.field_1366) + " instead of " + describeStack(reported));
+		}
+	}
+
+	private static String refusalLabel() {
+		return REFUSAL_NAMES[refusalCase];
+	}
+
+	/**
+	 * Gets the gold back into the pack, and the bar all cobblestone, with three ordinary clicks -
+	 * source, hotbar, source - since a full inventory leaves a shift click nowhere to go. These are
+	 * plain vanilla clicks, not the restock's, so nothing is ever reported wrongly about them.
+	 */
+	private static void setUpRefusalCase(Minecraft mc) {
+		faultInjection = false;
+		PlayerInventory inventory = mc.player.inventory;
+		int gold = hotbarSlotOf(inventory, GOLD);
+		if (gold >= 0) {
+			int slot = itemIdAt(inventory, MAIN_SLOT) == COBBLESTONE
+					? MAIN_SLOT : mainInventorySlotOf(inventory, COBBLESTONE);
+			if (slot >= 0) {
+				exchange(mc, slot, gold);
+			}
+		}
+		// Holding the first slot means the restock's natural first choice is off limits.
+		inventory.selectedSlot = 0;
+	}
+
+	/** Swaps a pack slot with a hotbar slot through the cursor, as a player would by hand. */
+	private static void exchange(Minecraft mc, int inventorySlot, int hotbarSlot) {
+		mc.interactionManager.clickSlot(0, inventorySlot, 0, false, mc.player);
+		mc.interactionManager.clickSlot(0, HOTBAR_FIRST_SLOT + hotbarSlot, 0, false, mc.player);
+		mc.interactionManager.clickSlot(0, inventorySlot, 0, false, mc.player);
+	}
+
+	private static boolean startRefusalCase(Minecraft mc) {
+		PlayerInventory inventory = mc.player.inventory;
+		String label = refusalLabel();
+		Log.info("SMOKETEST: " + label + " - starting from " + describe(inventory));
+
+		boolean ready = true;
+		ready &= checkReady(label + ": the setup left the cursor empty", inventory.getCursorStack() == null);
+		ready &= checkReady(label + ": every slot is full", stackCount(inventory) == TEST_STACKS);
+		ready &= checkReady(label + ": the hotbar is full", hotbarSlotOf(inventory, 0) < 0);
+		ready &= checkReady(label + ": no gold is on the hotbar", hotbarSlotOf(inventory, GOLD) < 0);
+		ready &= checkReady(label + ": the gold is in the pack", mainInventorySlotOf(inventory, GOLD) >= 0);
+		ready &= checkReady(label + ": no restock is left over", !HotbarRestock.isBusy());
+		if (!ready) {
+			return false;
+		}
+
+		caseSource = mainInventorySlotOf(inventory, GOLD);
+		caseSelected = inventory.selectedSlot;
+		caseSelectedItem = itemIdAt(inventory, caseSelected);
+		caseSelectedCount = inventory.main[caseSelected].count;
+		caseGold = itemTotal(inventory, GOLD);
+		caseCobblestone = itemTotal(inventory, COBBLESTONE);
+		caseGoldStack = inventory.main[caseSource].count;
+		caseStacks = stackList(inventory);
+
+		HotbarRestock.reset();
+		restockClicks = 0;
+		faultsInjected = 0;
+		faultMask = REFUSAL_CASES[refusalCase][0];
+		faultInjection = true;
+
+		checkTrue(label + ": the swap is made", HotbarRestock.moveToHotbar(mc, caseSource));
+		checkTrue(label + ": and waits on the server", HotbarRestock.isWaitingForServer());
+		checkTrue(label + ": a second restock is turned away while the first is in the air",
+				!HotbarRestock.moveToHotbar(mc, caseSource));
+		check(label + ": the swap is three ordinary clicks", restockClicks, 3);
+		HotbarRestock.onTransaction(0, (short) -1, true);
+		checkTrue(label + ": another transaction cannot confirm this swap", HotbarRestock.isWaitingForServer());
+		Screen previous = mc.currentScreen;
+		mc.setScreen(new ContainerScreen(mc.player.playerContainer) {
+			@Override
+			protected void drawBackground(float tickDelta) {
+			}
+		});
+		checkTrue(label + ": an inventory cannot interrupt the swap", mc.currentScreen == previous);
+		boolean easyPlace = Schematica.STATE.isEasyPlace;
+		Schematica.STATE.isEasyPlace = false;
+		checkTrue(label + ": use stays blocked even with easy place turned off", EasyPlace.interceptUse(mc));
+		Schematica.STATE.isEasyPlace = easyPlace;
+		return true;
+	}
+
+	private static boolean checkReady(String what, boolean actual) {
+		checkTrue(what, actual);
+		return actual;
+	}
+
+	private static void checkRefusalCase(Minecraft mc) {
+		PlayerInventory inventory = mc.player.inventory;
+		String label = refusalLabel();
+		int[] expected = REFUSAL_CASES[refusalCase];
+		Log.info("SMOKETEST: " + label + " - finished with " + describe(inventory) + ", cursor "
+				+ describeStack(inventory.getCursorStack()) + ", " + restockClicks + " clicks");
+
+		checkTrue(label + ": the restock is no longer busy", !HotbarRestock.isBusy());
+		checkTrue(label + ": nor waiting on the server", !HotbarRestock.isWaitingForServer());
+		check(label + ": every wrong report went out", faultsInjected, Integer.bitCount(expected[0]));
+		check(label + ": refusals counted", HotbarRestock.getRefusals(), expected[1]);
+		check(label + ": restock clicks sent, cleanup included", restockClicks, expected[2]);
+
+		checkTrue(label + ": nothing is left on the cursor", inventory.getCursorStack() == null);
+		check(label + ": every slot is still full", stackCount(inventory), TEST_STACKS);
+		check(label + ": no gold was lost or made", itemTotal(inventory, GOLD), caseGold);
+		check(label + ": no cobblestone was lost or made", itemTotal(inventory, COBBLESTONE), caseCobblestone);
+		checkText(label + ": the same stacks, only moved", String.valueOf(stackList(inventory)),
+				String.valueOf(caseStacks));
+
+		check(label + ": the held slot is still selected", inventory.selectedSlot, caseSelected);
+		check(label + ": the held stack is not given up", itemIdAt(inventory, caseSelected), caseSelectedItem);
+		check(label + ": nor its count", inventory.main[caseSelected] == null
+				? 0 : inventory.main[caseSelected].count, caseSelectedCount);
+
+		// Either the exchange finished, or it was abandoned with everything back where it was.
+		int gold = hotbarSlotOf(inventory, GOLD);
+		boolean onBar = gold >= 0 && itemIdAt(inventory, caseSource) == COBBLESTONE;
+		boolean abandoned = gold < 0 && itemIdAt(inventory, caseSource) == GOLD;
+		checkTrue(label + ": the gold is on the bar or back in its source slot", onBar || abandoned);
+		ItemStack goldStack = onBar ? inventory.main[gold] : inventory.main[caseSource];
+		check(label + ": the gold stack is whole", goldStack == null ? 0 : goldStack.count, caseGoldStack);
+		Log.info("SMOKETEST: " + label + " - the gold ended up "
+				+ (onBar ? "on hotbar slot " + gold : abandoned ? "back in slot " + caseSource : "nowhere expected"));
+	}
+
+	private static int itemTotal(PlayerInventory inventory, int itemId) {
+		int total = 0;
+		for (ItemStack stack : inventory.main) {
+			if (stack != null && stack.itemId == itemId) {
+				total += stack.count;
+			}
+		}
+		ItemStack cursor = inventory.getCursorStack();
+		if (cursor != null && cursor.itemId == itemId) {
+			total += cursor.count;
+		}
+		return total;
+	}
+
+	/** Every stack, cursor included, as sorted {@code item:damage x count}, wherever it sits. */
+	private static List<String> stackList(PlayerInventory inventory) {
+		List<String> stacks = new ArrayList<>();
+		for (ItemStack stack : inventory.main) {
+			if (stack != null) {
+				stacks.add(describeStack(stack));
+			}
+		}
+		if (inventory.getCursorStack() != null) {
+			stacks.add(describeStack(inventory.getCursorStack()));
+		}
+		java.util.Collections.sort(stacks);
+		return stacks;
+	}
+
+	private static String describeStack(ItemStack stack) {
+		return stack == null ? "nothing" : stack.itemId + ":" + stack.getDamage() + "x" + stack.count;
 	}
 
 	/**
@@ -1561,9 +1854,9 @@ public final class SmokeTest {
 	 * not use, and the gold out of reach in the pack. Which slot each stack landed in depends on the
 	 * order they were swept up, so this arranges them rather than hoping.
 	 *
-	 * <p>Plain shift clicks, the same ones a player makes in their inventory screen. That is setup,
-	 * not the thing under test - what is being tested is that the mod can do this for itself, with
-	 * no screen open, and have the server agree.
+	 * <p>Three plain clicks, the same ones a player makes in their inventory screen: with every slot
+	 * full a shift click has nowhere to go. That is setup, not the thing under test - what is being
+	 * tested is that the mod can do this for itself, with no screen open, and have the server agree.
 	 */
 	private static void arrangeInventory(Minecraft mc) {
 		PlayerInventory inventory = mc.player.inventory;
@@ -1572,12 +1865,9 @@ public final class SmokeTest {
 			return;
 		}
 
-		mc.interactionManager.clickSlot(0, HOTBAR_FIRST_SLOT + gold, 0, true, mc.player);
-		for (int slot = HOTBAR_SIZE; slot < inventory.main.length; slot++) {
-			if (itemIdAt(inventory, slot) != 0 && itemIdAt(inventory, slot) != GOLD) {
-				mc.interactionManager.clickSlot(0, slot, 0, true, mc.player);
-				return;
-			}
+		int slot = mainInventorySlotOf(inventory, COBBLESTONE);
+		if (slot >= 0) {
+			exchange(mc, slot, gold);
 		}
 	}
 
@@ -3077,6 +3367,7 @@ public final class SmokeTest {
 		PlayerInventory inventory = mc.player.inventory;
 		ItemStack[] saved = new ItemStack[inventory.main.length];
 		System.arraycopy(inventory.main, 0, saved, 0, saved.length);
+		ItemStack savedCursor = inventory.getCursorStack();
 		int savedBlock = schematic.getBlockId(2, 0, 2);
 		int savedMetadata = schematic.getMetadata(2, 0, 2);
 
@@ -3115,10 +3406,37 @@ public final class SmokeTest {
 			checkTrue("a full bar still takes the block", EasyPlace.interceptUse(mc));
 			check("the block the schematic does not use is the one given up", itemIdAt(inventory, 1), WOOL);
 			check("the tool is left alone", itemIdAt(inventory, 0), Item.WOODEN_PICKAXE.id);
-			// Somewhere in the inventory rather than a slot of its own: the container fills the first
-			// free one, which is not the slot the block came out of.
-			checkTrue("and what was given up went to the inventory",
-					mainInventorySlotOf(inventory, COBBLESTONE) >= HOTBAR_SIZE);
+			check("and what was given up takes the source slot", itemIdAt(inventory, MAIN_SLOT), COBBLESTONE);
+
+			// With every inventory slot occupied, shift-clicking cannot free a hotbar slot. The
+			// wanted stack's own slot must take the displaced block instead.
+			for (int slot = HOTBAR_SIZE; slot < inventory.main.length; slot++) {
+				inventory.main[slot] = new ItemStack(GOLD, 64, 0);
+			}
+			inventory.main[1] = new ItemStack(COBBLESTONE, 17, 0);
+			inventory.main[MAIN_SLOT] = new ItemStack(WOOL, 23, RED_WOOL);
+			schematic.setMetadata(2, 0, 2, RED_WOOL);
+			HotbarRestock.reset();
+
+			ItemStack cursor = new ItemStack(GOLD, 7, 0);
+			inventory.setCursorStack(cursor);
+			checkTrue("restocking does not take over an occupied cursor", !HotbarRestock.moveToHotbar(mc, MAIN_SLOT));
+			checkTrue("the cursor keeps its stack", inventory.getCursorStack() == cursor);
+			check("the cursor keeps its count", cursor.count, 7);
+			check("the hotbar is untouched with an occupied cursor", itemIdAt(inventory, 1), COBBLESTONE);
+			check("the source is untouched with an occupied cursor", itemIdAt(inventory, MAIN_SLOT), WOOL);
+			inventory.setCursorStack(null);
+
+			checkTrue("restocking a full inventory still spends the first click",
+					EasyPlace.interceptUse(mc));
+			check("a full inventory still brings the wanted block onto the bar", itemIdAt(inventory, 1), WOOL);
+			check("the wanted stack keeps its count", inventory.main[1].count, 23);
+			check("the wanted stack keeps its colour", inventory.main[1].getDamage(), RED_WOOL);
+			check("the displaced block takes the source slot", itemIdAt(inventory, MAIN_SLOT), COBBLESTONE);
+			check("the displaced stack keeps its count", inventory.main[MAIN_SLOT].count, 17);
+			checkTrue("restocking leaves nothing on the cursor", inventory.getCursorStack() == null);
+			checkTrue("the next click with a full inventory goes through", !EasyPlace.interceptUse(mc));
+			check("and selects the fetched stack", inventory.selectedSlot, 1);
 
 			// A bar with nothing to spare - tools, and the block in hand - keeps all of it.
 			clearInventory(inventory);
@@ -3137,6 +3455,7 @@ public final class SmokeTest {
 			schematic.setBlockId(2, 0, 2, savedBlock);
 			schematic.setMetadata(2, 0, 2, savedMetadata);
 			System.arraycopy(saved, 0, inventory.main, 0, saved.length);
+			inventory.setCursorStack(savedCursor);
 			inventory.selectedSlot = GOLD_SLOT;
 			HotbarRestock.reset();
 			Schematica.STATE.getActive().needsUpdate = true;

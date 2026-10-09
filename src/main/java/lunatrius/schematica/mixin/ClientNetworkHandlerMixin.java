@@ -3,10 +3,14 @@ package lunatrius.schematica.mixin;
 import lunatrius.schematica.HotbarRestock;
 import lunatrius.schematica.Schematica;
 import lunatrius.schematica.SchematicMemory;
+import net.minecraft.class_171;
+import net.minecraft.class_236;
 import net.minecraft.class_325;
+import net.minecraft.class_363;
 import net.minecraft.class_441;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.network.ClientNetworkHandler;
+import net.minecraft.network.Packet;
 import net.minecraft.network.packet.play.ChunkDataPacket;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -37,7 +41,27 @@ public abstract class ClientNetworkHandlerMixin {
 	 */
 	@Inject(method = "method_1429(Lnet/minecraft/class_325;)V", at = @At("HEAD"))
 	private void schematica$onTransaction(class_325 packet, CallbackInfo info) {
-		HotbarRestock.onTransaction(packet.field_1222, packet.field_1224);
+		HotbarRestock.onTransaction(packet.field_1222, packet.field_1223, packet.field_1224);
+	}
+
+	@Inject(method = "sendPacket(Lnet/minecraft/network/Packet;)V", at = @At("HEAD"))
+	private void schematica$onClickSent(Packet packet, CallbackInfo info) {
+		if (packet instanceof class_363 click) {
+			HotbarRestock.onClickSent(click);
+		}
+	}
+
+	/** Rejected clicks resynchronize the full inventory, then the cursor; read both after vanilla. */
+	@Inject(method = "method_1450(Lnet/minecraft/class_236;)V", at = @At("RETURN"))
+	private void schematica$onInventoryContents(class_236 packet, CallbackInfo info) {
+		HotbarRestock.onInventoryContents(packet.field_869);
+	}
+
+	@Inject(method = "method_1445(Lnet/minecraft/class_171;)V", at = @At("RETURN"))
+	private void schematica$onCursorUpdate(class_171 packet, CallbackInfo info) {
+		if (packet.field_593 == -1) {
+			HotbarRestock.onCursorUpdate(Schematica.getMinecraft());
+		}
 	}
 
 	/**

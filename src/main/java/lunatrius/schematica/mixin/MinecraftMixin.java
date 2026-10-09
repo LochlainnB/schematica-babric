@@ -1,9 +1,12 @@
 package lunatrius.schematica.mixin;
 
 import lunatrius.schematica.EasyPlace;
+import lunatrius.schematica.HotbarRestock;
 import lunatrius.schematica.SchematicMemory;
 import lunatrius.schematica.Schematica;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.screen.container.ContainerScreen;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.world.World;
 import org.spongepowered.asm.mixin.Mixin;
@@ -37,6 +40,15 @@ public abstract class MinecraftMixin {
 	@Inject(method = "method_2107(I)V", at = @At("HEAD"), cancellable = true)
 	private void schematica$onUse(int button, CallbackInfo info) {
 		if (button == 1 && EasyPlace.interceptUse((Minecraft) (Object) this)) {
+			info.cancel();
+		}
+	}
+
+	/** Do not let an inventory open and close while a server swap may still have a cursor stack. */
+	@Inject(method = "setScreen(Lnet/minecraft/client/gui/screen/Screen;)V", at = @At("HEAD"), cancellable = true)
+	private void schematica$onScreen(Screen screen, CallbackInfo info) {
+		if (screen instanceof ContainerScreen && HotbarRestock.isCursorSwapPending()
+				&& !HotbarRestock.needsManualRecovery()) {
 			info.cancel();
 		}
 	}

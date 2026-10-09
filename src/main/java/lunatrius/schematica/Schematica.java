@@ -126,14 +126,13 @@ public class Schematica implements ClientModInitializer {
 		// always say when it changes underneath one.
 		STATE.pollWorldUnderSchematics();
 
+		// Swaps must settle behind screens and during the smoke test's network waits too.
+		HotbarRestock.tick(mc);
+
 		if (lunatrius.schematica.debug.SmokeTest.isEnabled()) {
 			lunatrius.schematica.debug.SmokeTest.tick(mc);
 			return;
 		}
-
-		// Ahead of the screen check: a swap sent just before a screen was opened still has an answer
-		// coming, and its wait has to run down whether anyone is looking at the world or not.
-		HotbarRestock.tick();
 
 		if (mc.currentScreen != null || mc.world == null || mc.player == null) {
 			// Still polled so a key held down over a screen is not seen as a fresh press afterwards.
